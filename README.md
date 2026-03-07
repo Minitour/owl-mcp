@@ -163,22 +163,6 @@ cargo clippy --all-targets -- -D warnings
 cargo build --release
 ```
 
-## Releasing
-
-Push a version tag to trigger the [release workflow](.github/workflows/release.yml), which will:
-
-1. Build native binaries for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64)
-2. Publish platform-specific npm packages (`@owl-mcp/owl-mcp-<platform>`)
-3. Publish the main `owl-mcp` npm package
-4. Create a GitHub Release with all binaries attached
-
-```bash
-git tag v1.2.0
-git push --tags
-```
-
-The `NPM_TOKEN` secret must be configured in the repository settings before the first release.
-
 ## License
 
-MIT — Antonio Zaitoun &lt;antonio@zaitoun.dev&gt;
+MIT
