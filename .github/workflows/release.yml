@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]*"
+      - "v[0-9]*.[0-9]*.[0-9]*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -133,49 +133,43 @@ jobs:
         run: |
           set -euo pipefail
 
-          declare -A PLATFORM_BINARY
-          PLATFORM_BINARY["linux-x64"]="owl-mcp"
-          PLATFORM_BINARY["linux-arm64"]="owl-mcp"
-          PLATFORM_BINARY["darwin-x64"]="owl-mcp"
-          PLATFORM_BINARY["darwin-arm64"]="owl-mcp"
-          PLATFORM_BINARY["win32-x64"]="owl-mcp.exe"
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN secret is not set. Add it in Settings → Secrets → Actions."
+            exit 1
+          fi
 
-          declare -A PLATFORM_OS
-          PLATFORM_OS["linux-x64"]="linux"
-          PLATFORM_OS["linux-arm64"]="linux"
-          PLATFORM_OS["darwin-x64"]="darwin"
-          PLATFORM_OS["darwin-arm64"]="darwin"
-          PLATFORM_OS["win32-x64"]="win32"
-
-          declare -A PLATFORM_CPU
-          PLATFORM_CPU["linux-x64"]="x64"
-          PLATFORM_CPU["linux-arm64"]="arm64"
-          PLATFORM_CPU["darwin-x64"]="x64"
-          PLATFORM_CPU["darwin-arm64"]="arm64"
-          PLATFORM_CPU["win32-x64"]="x64"
+          echo "Publishing version: ${VERSION}"
+          echo "Artifact structure:"
+          ls -la artifacts/
 
           for PLATFORM in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64; do
-            BINARY="${PLATFORM_BINARY[$PLATFORM]}"
-            OS="${PLATFORM_OS[$PLATFORM]}"
-            CPU="${PLATFORM_CPU[$PLATFORM]}"
+            case "$PLATFORM" in
+              linux-x64)   BINARY="owl-mcp"     ; OS="linux"  ; CPU="x64"   ;;
+              linux-arm64) BINARY="owl-mcp"     ; OS="linux"  ; CPU="arm64" ;;
+              darwin-x64)  BINARY="owl-mcp"     ; OS="darwin" ; CPU="x64"   ;;
+              darwin-arm64) BINARY="owl-mcp"    ; OS="darwin" ; CPU="arm64" ;;
+              win32-x64)   BINARY="owl-mcp.exe" ; OS="win32"  ; CPU="x64"   ;;
+            esac
+
             PKG_NAME="@owl-mcp/owl-mcp-${PLATFORM}"
             SRC="artifacts/binary-${PLATFORM}/${BINARY}"
 
+            echo "Packaging ${PKG_NAME} from ${SRC}"
             mkdir -p "pkg-${PLATFORM}/bin"
             cp "$SRC" "pkg-${PLATFORM}/bin/${BINARY}"
             chmod +x "pkg-${PLATFORM}/bin/${BINARY}"
 
-            cat > "pkg-${PLATFORM}/package.json" <<JSON
-          {
-            "name": "${PKG_NAME}",
-            "version": "${VERSION}",
-            "description": "owl-mcp native binary for ${OS}/${CPU}",
-            "os": ["${OS}"],
-            "cpu": ["${CPU}"],
-            "license": "MIT",
-            "files": ["bin"]
-          }
-          JSON
+            cat > "pkg-${PLATFORM}/package.json" << EOF
+{
+  "name": "${PKG_NAME}",
+  "version": "${VERSION}",
+  "description": "owl-mcp native binary for ${OS}/${CPU}",
+  "os": ["${OS}"],
+  "cpu": ["${CPU}"],
+  "license": "MIT",
+  "files": ["bin"]
+}
+EOF
 
             npm publish "pkg-${PLATFORM}" --access public
           done
