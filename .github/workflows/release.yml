@@ -104,7 +104,6 @@ jobs:
     name: Publish
     needs: build
     runs-on: ubuntu-latest
-    environment: npm-publish     # optional: require approval before publish
 
     steps:
       - uses: actions/checkout@v4
