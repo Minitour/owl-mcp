@@ -159,20 +159,19 @@ jobs:
             cp "$SRC" "pkg-${PLATFORM}/bin/${BINARY}"
             chmod +x "pkg-${PLATFORM}/bin/${BINARY}"
 
-            node -e "
-              const pkg = {
-                name: '$PKG_NAME',
-                version: '$VERSION',
-                description: 'owl-mcp native binary for $OS/$CPU',
-                os: ['$OS'],
-                cpu: ['$CPU'],
-                license: 'MIT',
-                files: ['bin']
-              };
-              require('fs').writeFileSync('pkg-$PLATFORM/package.json', JSON.stringify(pkg, null, 2) + '\n');
-            "
+            cat > "pkg-${PLATFORM}/package.json" <<PKGJSON
+          {
+            "name": "${PKG_NAME}",
+            "version": "${VERSION}",
+            "description": "owl-mcp native binary for ${OS}/${CPU}",
+            "os": ["${OS}"],
+            "cpu": ["${CPU}"],
+            "license": "MIT",
+            "files": ["bin"]
+          }
+          PKGJSON
 
-            npm publish "pkg-${PLATFORM}" --access public
+            npm publish "./pkg-${PLATFORM}" --access public
           done
 
       - name: Update main package version and publish
