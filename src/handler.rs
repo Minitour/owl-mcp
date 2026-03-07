@@ -2,16 +2,15 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rust_mcp_sdk::{
-    McpServer,
     mcp_server::ServerHandler,
     schema::{
-        CallToolRequestParams, ContentBlock, GetPromptRequestParams, GetPromptResult,
-        ListPromptsResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt,
-        PromptArgument, PromptMessage, ReadResourceContent, ReadResourceRequestParams,
-        ReadResourceResult, Resource, Role, RpcError, TextContent, TextResourceContents,
-        schema_utils::CallToolError,
-        CallToolResult,
+        schema_utils::CallToolError, CallToolRequestParams, CallToolResult, ContentBlock,
+        GetPromptRequestParams, GetPromptResult, ListPromptsResult, ListResourcesResult,
+        ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument, PromptMessage,
+        ReadResourceContent, ReadResourceRequestParams, ReadResourceResult, Resource, Role,
+        RpcError, TextContent, TextResourceContents,
     },
+    McpServer,
 };
 use tokio::sync::Mutex;
 
@@ -73,9 +72,7 @@ impl ServerHandler for OwlMcpHandler {
             OwlTools::RegisterOntologyInConfig(p) => {
                 RegisterOntologyInConfig::run_tool(p, mgr).await
             }
-            OwlTools::LoadAndRegisterOntology(p) => {
-                LoadAndRegisterOntology::run_tool(p, mgr).await
-            }
+            OwlTools::LoadAndRegisterOntology(p) => LoadAndRegisterOntology::run_tool(p, mgr).await,
         }
     }
 
@@ -124,22 +121,23 @@ impl ServerHandler for OwlMcpHandler {
         let uri = &params.uri;
         let mgr = self.manager.lock().await;
 
-        let text = if uri == "resource://config/ontologies" {
-            serde_json::to_string_pretty(&mgr.config)
-                .unwrap_or_else(|e| format!("Error serializing config: {}", e))
-        } else if uri == "resource://active" {
-            serde_json::to_string_pretty(&mgr.active_paths())
-                .unwrap_or_else(|e| format!("Error: {}", e))
-        } else if let Some(name) = uri.strip_prefix("resource://config/ontology/") {
-            match mgr.get_ontology_config(name) {
-                Some(info) => serde_json::to_string_pretty(&info)
-                    .unwrap_or_else(|e| format!("Error: {}", e)),
-                None => format!("No configured ontology named '{}'", name),
-            }
-        } else {
-            return Err(RpcError::invalid_params()
-                .with_message(format!("Unknown resource URI: {}", uri)));
-        };
+        let text =
+            if uri == "resource://config/ontologies" {
+                serde_json::to_string_pretty(&mgr.config)
+                    .unwrap_or_else(|e| format!("Error serializing config: {}", e))
+            } else if uri == "resource://active" {
+                serde_json::to_string_pretty(&mgr.active_paths())
+                    .unwrap_or_else(|e| format!("Error: {}", e))
+            } else if let Some(name) = uri.strip_prefix("resource://config/ontology/") {
+                match mgr.get_ontology_config(name) {
+                    Some(info) => serde_json::to_string_pretty(&info)
+                        .unwrap_or_else(|e| format!("Error: {}", e)),
+                    None => format!("No configured ontology named '{}'", name),
+                }
+            } else {
+                return Err(RpcError::invalid_params()
+                    .with_message(format!("Unknown resource URI: {}", uri)));
+            };
 
         Ok(ReadResourceResult {
             contents: vec![ReadResourceContent::TextResourceContents(

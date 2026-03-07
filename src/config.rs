@@ -131,7 +131,11 @@ mod tests {
         cfg.set_ontology(sample_info("a", "/a.ofn"));
         cfg.set_ontology(sample_info("b", "/b.ofn"));
         cfg.set_ontology(sample_info("c", "/c.ofn"));
-        let mut names: Vec<_> = cfg.list_ontologies().iter().map(|i| i.name.clone()).collect();
+        let mut names: Vec<_> = cfg
+            .list_ontologies()
+            .iter()
+            .map(|i| i.name.clone())
+            .collect();
         names.sort();
         assert_eq!(names, vec!["a", "b", "c"]);
     }

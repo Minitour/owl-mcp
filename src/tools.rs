@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rust_mcp_sdk::{
     macros::{mcp_tool, JsonSchema},
-    schema::{CallToolResult, TextContent, schema_utils::CallToolError},
+    schema::{schema_utils::CallToolError, CallToolResult, TextContent},
     tool_box,
 };
 use tokio::sync::Mutex;
@@ -38,12 +38,17 @@ pub struct AddAxiom {
 }
 
 impl AddAxiom {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, true)
             .map_err(CallToolError::new)?;
-        let msg = api.add_axiom(&params.axiom_str).map_err(CallToolError::new)?;
+        let msg = api
+            .add_axiom(&params.axiom_str)
+            .map_err(CallToolError::new)?;
         text_result(msg)
     }
 }
@@ -61,7 +66,10 @@ pub struct AddAxioms {
 }
 
 impl AddAxioms {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, true)
@@ -86,7 +94,10 @@ pub struct RemoveAxiom {
 }
 
 impl RemoveAxiom {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, false)
@@ -119,7 +130,10 @@ pub struct FindAxioms {
 }
 
 impl FindAxioms {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, false)
@@ -155,7 +169,10 @@ pub struct GetAllAxioms {
 }
 
 impl GetAllAxioms {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, false)
@@ -186,7 +203,10 @@ pub struct AddPrefix {
 }
 
 impl AddPrefix {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, true)
@@ -209,7 +229,10 @@ pub struct OntologyMetadata {
 }
 
 impl OntologyMetadata {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, false)
@@ -234,7 +257,10 @@ pub struct GetLabelsForIri {
 }
 
 impl GetLabelsForIri {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load(&params.owl_file_path, false, false)
@@ -259,12 +285,17 @@ pub struct AddAxiomByName {
 }
 
 impl AddAxiomByName {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load_by_name(&params.ontology_name)
             .map_err(CallToolError::new)?;
-        let msg = api.add_axiom(&params.axiom_str).map_err(CallToolError::new)?;
+        let msg = api
+            .add_axiom(&params.axiom_str)
+            .map_err(CallToolError::new)?;
         text_result(msg)
     }
 }
@@ -282,7 +313,10 @@ pub struct RemoveAxiomByName {
 }
 
 impl RemoveAxiomByName {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load_by_name(&params.ontology_name)
@@ -315,7 +349,10 @@ pub struct FindAxiomsByName {
 }
 
 impl FindAxiomsByName {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load_by_name(&params.ontology_name)
@@ -347,7 +384,10 @@ pub struct AddPrefixByName {
 }
 
 impl AddPrefixByName {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load_by_name(&params.ontology_name)
@@ -374,7 +414,10 @@ pub struct GetLabelsForIriByName {
 }
 
 impl GetLabelsForIriByName {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let api = mgr
             .get_or_load_by_name(&params.ontology_name)
@@ -439,7 +482,10 @@ pub struct ConfigureOntology {
 }
 
 impl ConfigureOntology {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let info = OntologyConfigInfo {
             name: params.name,
             path: params.path,
@@ -466,7 +512,10 @@ pub struct RemoveOntologyConfig {
 }
 
 impl RemoveOntologyConfig {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let msg = mgr
             .remove_ontology_config(&params.name)
@@ -486,7 +535,10 @@ pub struct GetOntologyConfig {
 }
 
 impl GetOntologyConfig {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mgr = manager.lock().await;
         match mgr.get_ontology_config(&params.name) {
             Some(info) => {
@@ -520,7 +572,10 @@ pub struct RegisterOntologyInConfig {
 }
 
 impl RegisterOntologyInConfig {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let msg = mgr
             .register_in_config(
@@ -563,7 +618,10 @@ pub struct LoadAndRegisterOntology {
 }
 
 impl LoadAndRegisterOntology {
-    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
         let mut mgr = manager.lock().await;
         let msg = mgr
             .load_and_register(

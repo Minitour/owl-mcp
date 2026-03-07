@@ -9,12 +9,12 @@ use clap::{Parser, ValueEnum};
 use handler::OwlMcpHandler;
 use ontology::{manager::OntologyManager, watcher::spawn_watcher};
 use rust_mcp_sdk::{
-    McpServer, StdioTransport, ToMcpServerHandler, TransportOptions,
-    mcp_server::{McpServerOptions, server_runtime},
+    mcp_server::{server_runtime, McpServerOptions},
     schema::{
         Implementation, InitializeResult, ProtocolVersion, ServerCapabilities,
         ServerCapabilitiesPrompts, ServerCapabilitiesResources, ServerCapabilitiesTools,
     },
+    McpServer, StdioTransport, ToMcpServerHandler, TransportOptions,
 };
 use tokio::sync::Mutex;
 
