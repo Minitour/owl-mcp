@@ -1,0 +1,617 @@
+use std::sync::Arc;
+
+use rust_mcp_sdk::{
+    macros::{mcp_tool, JsonSchema},
+    schema::{CallToolResult, TextContent, schema_utils::CallToolError},
+    tool_box,
+};
+use tokio::sync::Mutex;
+
+use crate::config::OntologyConfigInfo;
+use crate::ontology::manager::OntologyManager;
+
+pub type Manager = Arc<Mutex<OntologyManager>>;
+
+fn text_result(s: impl Into<String>) -> Result<CallToolResult, CallToolError> {
+    Ok(CallToolResult::text_content(vec![TextContent::from(
+        s.into(),
+    )]))
+}
+
+fn list_result(items: Vec<String>) -> Result<CallToolResult, CallToolError> {
+    let content: Vec<TextContent> = items.into_iter().map(TextContent::from).collect();
+    Ok(CallToolResult::text_content(content))
+}
+
+// ── Path-based axiom operations ───────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "add_axiom",
+    description = "Add a single OWL axiom in functional syntax to the ontology file. E.g. SubClassOf(:Dog :Animal)"
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddAxiom {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Axiom in OWL functional syntax, e.g. SubClassOf(:Dog :Animal)
+    pub axiom_str: String,
+}
+
+impl AddAxiom {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api.add_axiom(&params.axiom_str).map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "add_axioms",
+    description = "Add multiple OWL axioms in functional syntax to the ontology file. Stops on the first failure."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddAxioms {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// List of axioms in OWL functional syntax
+    pub axiom_strs: Vec<String>,
+}
+
+impl AddAxioms {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_axioms(&params.axiom_strs)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "remove_axiom",
+    description = "Remove a single OWL axiom (given in functional syntax) from the ontology file."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct RemoveAxiom {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Axiom in OWL functional syntax to remove
+    pub axiom_str: String,
+}
+
+impl RemoveAxiom {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, false)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .remove_axiom(&params.axiom_str)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "find_axioms",
+    description = "Search axioms in an OWL file using a regex pattern. Returns matching axioms (up to limit)."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct FindAxioms {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Regex pattern to match against functional-syntax axiom strings
+    pub pattern: String,
+    /// Maximum number of results to return (default: 100)
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    /// If true, append human-readable labels after ## comments
+    #[serde(default)]
+    pub include_labels: bool,
+    /// IRI or CURIE of the annotation property to use for labels (default: rdfs:label)
+    pub annotation_property: Option<String>,
+}
+
+impl FindAxioms {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, false)
+            .map_err(CallToolError::new)?;
+        let results = api
+            .find_axioms(
+                &params.pattern,
+                params.limit as usize,
+                params.include_labels,
+                params.annotation_property.as_deref(),
+            )
+            .map_err(CallToolError::new)?;
+        list_result(results)
+    }
+}
+
+#[mcp_tool(
+    name = "get_all_axioms",
+    description = "Return all axioms in the OWL file (up to limit)."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetAllAxioms {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Maximum number of results to return (default: 100)
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    /// If true, append human-readable labels after ## comments
+    #[serde(default)]
+    pub include_labels: bool,
+    /// IRI or CURIE of the annotation property to use for labels (default: rdfs:label)
+    pub annotation_property: Option<String>,
+}
+
+impl GetAllAxioms {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, false)
+            .map_err(CallToolError::new)?;
+        let results = api.get_all_axioms(
+            params.limit as usize,
+            params.include_labels,
+            params.annotation_property.as_deref(),
+        );
+        list_result(results)
+    }
+}
+
+// ── Path-based metadata operations ────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "add_prefix",
+    description = "Add a prefix mapping (e.g. prefix='ex:' uri='http://example.org/') to the ontology file."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddPrefix {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Prefix name including colon, e.g. 'ex:'
+    pub prefix: String,
+    /// The full IRI the prefix expands to, e.g. 'http://example.org/'
+    pub uri: String,
+}
+
+impl AddPrefix {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_prefix(&params.prefix, &params.uri)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "ontology_metadata",
+    description = "Return the ontology-level annotation axioms (metadata header) for the given OWL file."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct OntologyMetadata {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+}
+
+impl OntologyMetadata {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, false)
+            .map_err(CallToolError::new)?;
+        let results = api.ontology_metadata();
+        list_result(results)
+    }
+}
+
+#[mcp_tool(
+    name = "get_labels_for_iri",
+    description = "Return all label values for a given IRI or CURIE in the ontology file. Defaults to rdfs:label."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetLabelsForIri {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Full IRI or CURIE (e.g. 'ex:Dog' or '<http://example.org/Dog>')
+    pub iri: String,
+    /// IRI or CURIE of the annotation property (default: rdfs:label)
+    pub annotation_property: Option<String>,
+}
+
+impl GetLabelsForIri {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, false)
+            .map_err(CallToolError::new)?;
+        let results = api.get_labels_for_iri(&params.iri, params.annotation_property.as_deref());
+        list_result(results)
+    }
+}
+
+// ── Name-based variants ────────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "add_axiom_by_name",
+    description = "Add an OWL axiom to a configured ontology referenced by its registered name."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddAxiomByName {
+    /// Name of a configured ontology (from list_configured_ontologies)
+    pub ontology_name: String,
+    /// Axiom in OWL functional syntax
+    pub axiom_str: String,
+}
+
+impl AddAxiomByName {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load_by_name(&params.ontology_name)
+            .map_err(CallToolError::new)?;
+        let msg = api.add_axiom(&params.axiom_str).map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "remove_axiom_by_name",
+    description = "Remove an OWL axiom from a configured ontology referenced by its registered name."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct RemoveAxiomByName {
+    /// Name of a configured ontology
+    pub ontology_name: String,
+    /// Axiom in OWL functional syntax to remove
+    pub axiom_str: String,
+}
+
+impl RemoveAxiomByName {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load_by_name(&params.ontology_name)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .remove_axiom(&params.axiom_str)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "find_axioms_by_name",
+    description = "Search axioms in a configured ontology by name using a regex pattern."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct FindAxiomsByName {
+    /// Name of a configured ontology
+    pub ontology_name: String,
+    /// Regex pattern to match against functional-syntax axiom strings
+    pub pattern: String,
+    /// Maximum number of results to return (default: 100)
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    /// If true, append human-readable labels after ## comments
+    #[serde(default)]
+    pub include_labels: bool,
+    /// IRI or CURIE of the annotation property to use for labels (default: rdfs:label)
+    pub annotation_property: Option<String>,
+}
+
+impl FindAxiomsByName {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load_by_name(&params.ontology_name)
+            .map_err(CallToolError::new)?;
+        let results = api
+            .find_axioms(
+                &params.pattern,
+                params.limit as usize,
+                params.include_labels,
+                params.annotation_property.as_deref(),
+            )
+            .map_err(CallToolError::new)?;
+        list_result(results)
+    }
+}
+
+#[mcp_tool(
+    name = "add_prefix_by_name",
+    description = "Add a prefix mapping to a configured ontology referenced by its registered name."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddPrefixByName {
+    /// Name of a configured ontology
+    pub ontology_name: String,
+    /// Prefix name including colon, e.g. 'ex:'
+    pub prefix: String,
+    /// The full IRI the prefix expands to
+    pub uri: String,
+}
+
+impl AddPrefixByName {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load_by_name(&params.ontology_name)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_prefix(&params.prefix, &params.uri)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "get_labels_for_iri_by_name",
+    description = "Return all label values for an IRI or CURIE in a configured ontology referenced by name."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetLabelsForIriByName {
+    /// Name of a configured ontology
+    pub ontology_name: String,
+    /// Full IRI or CURIE
+    pub iri: String,
+    /// IRI or CURIE of the annotation property (default: rdfs:label)
+    pub annotation_property: Option<String>,
+}
+
+impl GetLabelsForIriByName {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load_by_name(&params.ontology_name)
+            .map_err(CallToolError::new)?;
+        let results = api.get_labels_for_iri(&params.iri, params.annotation_property.as_deref());
+        list_result(results)
+    }
+}
+
+// ── Configuration tools ────────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "list_configured_ontologies",
+    description = "List all ontologies registered in the ~/.owl-mcp/config.yaml configuration."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct ListConfiguredOntologies {}
+
+impl ListConfiguredOntologies {
+    pub async fn run_tool(
+        _params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mgr = manager.lock().await;
+        let ontologies = mgr.list_configured_ontologies();
+        let results: Vec<String> = ontologies
+            .iter()
+            .map(|o| {
+                serde_json::to_string_pretty(o)
+                    .unwrap_or_else(|_| format!("{}: {}", o.name, o.path))
+            })
+            .collect();
+        if results.is_empty() {
+            text_result("No configured ontologies.")
+        } else {
+            list_result(results)
+        }
+    }
+}
+
+#[mcp_tool(
+    name = "configure_ontology",
+    description = "Add or update a named ontology in the configuration. The ontology will be reloaded if already active."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct ConfigureOntology {
+    /// Unique name for this ontology
+    pub name: String,
+    /// Absolute path to the OWL file
+    pub path: String,
+    /// Optional metadata axioms to add when loading
+    pub metadata_axioms: Option<Vec<String>>,
+    /// If true, the ontology cannot be modified through this server
+    #[serde(default)]
+    pub readonly: bool,
+    /// Human-readable description
+    pub description: Option<String>,
+    /// Preferred serialization format (e.g. 'ofn', 'rdf')
+    pub preferred_serialization: Option<String>,
+    /// IRI or CURIE of the annotation property for labels
+    pub annotation_property: Option<String>,
+}
+
+impl ConfigureOntology {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let info = OntologyConfigInfo {
+            name: params.name,
+            path: params.path,
+            metadata_axioms: params.metadata_axioms.unwrap_or_default(),
+            readonly: params.readonly,
+            description: params.description,
+            preferred_serialization: params.preferred_serialization,
+            annotation_property: params.annotation_property,
+        };
+        let mut mgr = manager.lock().await;
+        let msg = mgr.configure_ontology(info).map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "remove_ontology_config",
+    description = "Remove an ontology from the configuration (and stop it if currently active)."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct RemoveOntologyConfig {
+    /// Name of the configured ontology to remove
+    pub name: String,
+}
+
+impl RemoveOntologyConfig {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let msg = mgr
+            .remove_ontology_config(&params.name)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "get_ontology_config",
+    description = "Retrieve the configuration details for a specific named ontology."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetOntologyConfig {
+    /// Name of the configured ontology
+    pub name: String,
+}
+
+impl GetOntologyConfig {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mgr = manager.lock().await;
+        match mgr.get_ontology_config(&params.name) {
+            Some(info) => {
+                let json = serde_json::to_string_pretty(&info)
+                    .unwrap_or_else(|_| format!("{}: {}", info.name, info.path));
+                text_result(json)
+            }
+            None => text_result(format!("No configured ontology named '{}'", params.name)),
+        }
+    }
+}
+
+#[mcp_tool(
+    name = "register_ontology_in_config",
+    description = "Register an OWL file into the configuration so it can be referenced by name in future sessions."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct RegisterOntologyInConfig {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Name to register under (defaults to the file stem)
+    pub name: Option<String>,
+    /// If true, the ontology cannot be modified
+    pub readonly: Option<bool>,
+    /// Human-readable description
+    pub description: Option<String>,
+    /// Preferred serialization format
+    pub preferred_serialization: Option<String>,
+    /// IRI or CURIE of the annotation property for labels
+    pub annotation_property: Option<String>,
+}
+
+impl RegisterOntologyInConfig {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let msg = mgr
+            .register_in_config(
+                &params.owl_file_path,
+                params.name,
+                params.readonly,
+                params.description,
+                params.preferred_serialization,
+                params.annotation_property,
+            )
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "load_and_register_ontology",
+    description = "Load (or create) an OWL file, optionally add metadata axioms, and register it in the configuration."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct LoadAndRegisterOntology {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Name to register under (defaults to the file stem)
+    pub name: Option<String>,
+    /// If true, the ontology cannot be modified
+    #[serde(default)]
+    pub readonly: bool,
+    /// If true, create the file if it does not exist (default: true)
+    #[serde(default = "default_true")]
+    pub create_if_not_exists: bool,
+    /// Human-readable description
+    pub description: Option<String>,
+    /// Preferred serialization format
+    pub preferred_serialization: Option<String>,
+    /// Optional metadata axioms to add when loading
+    pub metadata_axioms: Option<Vec<String>>,
+    /// IRI or CURIE of the annotation property for labels
+    pub annotation_property: Option<String>,
+}
+
+impl LoadAndRegisterOntology {
+    pub async fn run_tool(params: Self, manager: &Manager) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let msg = mgr
+            .load_and_register(
+                &params.owl_file_path,
+                params.name,
+                params.readonly,
+                params.create_if_not_exists,
+                params.description,
+                params.preferred_serialization,
+                params.metadata_axioms,
+                params.annotation_property,
+            )
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+// ── Tool box (enum + dispatch) ─────────────────────────────────────────────────
+
+fn default_limit() -> u64 {
+    100
+}
+
+fn default_true() -> bool {
+    true
+}
+
+tool_box!(
+    OwlTools,
+    [
+        AddAxiom,
+        AddAxioms,
+        RemoveAxiom,
+        FindAxioms,
+        GetAllAxioms,
+        AddPrefix,
+        OntologyMetadata,
+        GetLabelsForIri,
+        AddAxiomByName,
+        RemoveAxiomByName,
+        FindAxiomsByName,
+        AddPrefixByName,
+        GetLabelsForIriByName,
+        ListConfiguredOntologies,
+        ConfigureOntology,
+        RemoveOntologyConfig,
+        GetOntologyConfig,
+        RegisterOntologyInConfig,
+        LoadAndRegisterOntology,
+    ]
+);

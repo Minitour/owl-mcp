@@ -1,0 +1,25 @@
+# Rust build output
+/target/
+
+# Cargo.lock is intentionally committed for binary crates
+
+# Node / npm
+node_modules/
+npm/node_modules/
+
+# Environment / secrets
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test artifacts
+*.tmp
