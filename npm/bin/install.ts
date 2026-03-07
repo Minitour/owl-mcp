@@ -5,13 +5,10 @@
  * the install.
  */
 
-"use strict";
-
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 
-const PLATFORM_PACKAGES = {
+const PLATFORM_PACKAGES: Record<string, string> = {
   "linux-x64": "@owl-mcp/owl-mcp-linux-x64",
   "linux-arm64": "@owl-mcp/owl-mcp-linux-arm64",
   "darwin-x64": "@owl-mcp/owl-mcp-darwin-x64",
@@ -39,7 +36,7 @@ try {
   } else {
     console.warn(`owl-mcp: Optional package found but binary missing at ${candidate}`);
   }
-} catch (_) {
+} catch {
   console.warn(
     `owl-mcp: Platform package '${packageName}' was not installed (optional).\n` +
       "You may need to install it manually, or build from source."

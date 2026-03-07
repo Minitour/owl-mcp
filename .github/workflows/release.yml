@@ -197,6 +197,8 @@ jobs:
         run: |
           set -euo pipefail
           cd npm
+          # Single source of truth: copy repo README for npm package page
+          cp ../README.md README.md
           # Pin all optional dependency versions to the newly released version
           node -e "
             const fs = require('fs');

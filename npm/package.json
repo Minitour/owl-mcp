@@ -17,13 +17,14 @@
     "model-context-protocol"
   ],
   "files": [
-    "bin"
+    "bin",
+    "README.md"
   ],
   "bin": {
-    "owl-mcp": "./bin/owl-mcp.js"
+    "owl-mcp": "./bin/owl-mcp.ts"
   },
   "scripts": {
-    "postinstall": "node ./bin/install.js"
+    "postinstall": "node ./bin/install.ts"
   },
   "optionalDependencies": {
     "@owl-mcp/owl-mcp-linux-x64": "1.0.0",
@@ -33,6 +34,6 @@
     "@owl-mcp/owl-mcp-win32-x64": "1.0.0"
   },
   "engines": {
-    "node": ">=14"
+    "node": ">=22.18"
   }
 }
