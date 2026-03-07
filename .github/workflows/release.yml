@@ -172,6 +172,7 @@ jobs:
           PKGJSON
 
             npm publish "./pkg-${PLATFORM}" --access public
+            sleep 10
           done
 
       - name: Update main package version and publish
