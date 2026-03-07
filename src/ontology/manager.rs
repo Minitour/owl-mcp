@@ -64,9 +64,7 @@ impl OntologyManager {
         let info = self
             .config
             .get_ontology(name)
-            .ok_or_else(|| {
-                OwlApiError::Parse(format!("No configured ontology named '{}'", name))
-            })?
+            .ok_or_else(|| OwlApiError::Parse(format!("No configured ontology named '{}'", name)))?
             .clone();
         let readonly = info.readonly;
         self.get_or_load(&info.path, readonly, false)
@@ -75,11 +73,7 @@ impl OntologyManager {
     // ── Config management ──────────────────────────────────────────────────────
 
     pub fn list_configured_ontologies(&self) -> Vec<OntologyConfigInfo> {
-        self.config
-            .list_ontologies()
-            .into_iter()
-            .cloned()
-            .collect()
+        self.config.list_ontologies().into_iter().cloned().collect()
     }
 
     pub fn configure_ontology(&mut self, info: OntologyConfigInfo) -> Result<String, OwlApiError> {
@@ -88,7 +82,9 @@ impl OntologyManager {
         let path = canonicalize_or_absolute(Path::new(&info.path));
         self.apis.remove(&path);
         self.config.set_ontology(info);
-        self.config.save().map_err(|e| OwlApiError::Parse(e.to_string()))?;
+        self.config
+            .save()
+            .map_err(|e| OwlApiError::Parse(e.to_string()))?;
         Ok(format!("Configured ontology '{}'", name))
     }
 
@@ -96,7 +92,9 @@ impl OntologyManager {
         if let Some(info) = self.config.remove_ontology(name) {
             let path = canonicalize_or_absolute(Path::new(&info.path));
             self.apis.remove(&path);
-            self.config.save().map_err(|e| OwlApiError::Parse(e.to_string()))?;
+            self.config
+                .save()
+                .map_err(|e| OwlApiError::Parse(e.to_string()))?;
             Ok(format!("Removed ontology config '{}'", name))
         } else {
             Ok(format!("No configured ontology named '{}'", name))
@@ -133,13 +131,16 @@ impl OntologyManager {
             ..Default::default()
         };
         self.config.set_ontology(info);
-        self.config.save().map_err(|e| OwlApiError::Parse(e.to_string()))?;
+        self.config
+            .save()
+            .map_err(|e| OwlApiError::Parse(e.to_string()))?;
         Ok(format!(
             "Registered ontology '{}' from '{}'",
             resolved_name, owl_file_path
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn load_and_register(
         &mut self,
         owl_file_path: &str,
@@ -180,7 +181,9 @@ impl OntologyManager {
             annotation_property,
         };
         self.config.set_ontology(info);
-        self.config.save().map_err(|e| OwlApiError::Parse(e.to_string()))?;
+        self.config
+            .save()
+            .map_err(|e| OwlApiError::Parse(e.to_string()))?;
         Ok(format!(
             "Loaded and registered ontology '{}' from '{}'",
             resolved_name, owl_file_path

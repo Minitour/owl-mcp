@@ -95,9 +95,7 @@ impl OwlApi {
         }
 
         let content = std::fs::read(&path)?;
-        let last_modified = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok();
+        let last_modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
         let format = detect_format(&path, &content);
         let (ontology, prefixes) = parse_bytes(&content, &build, format)?;
 
@@ -273,36 +271,32 @@ impl OwlApi {
         if prefix_name.is_empty() {
             self.prefixes.set_default(uri);
         } else {
-            self.prefixes.add_prefix(prefix_name, uri).map_err(|e| {
-                OwlApiError::Parse(format!("Failed to add prefix: {:?}", e))
-            })?;
+            self.prefixes
+                .add_prefix(prefix_name, uri)
+                .map_err(|e| OwlApiError::Parse(format!("Failed to add prefix: {:?}", e)))?;
         }
         self.save()?;
         Ok(format!("Added prefix {}=<{}>", prefix, uri))
     }
 
-    pub fn get_labels_for_iri(
-        &self,
-        iri: &str,
-        annotation_property: Option<&str>,
-    ) -> Vec<String> {
+    pub fn get_labels_for_iri(&self, iri: &str, annotation_property: Option<&str>) -> Vec<String> {
         let label_prop_iri = self.resolve_ann_prop_iri(annotation_property);
         let subject_iri = self.expand_curie(iri);
 
         self.ontology
             .iter()
             .filter_map(|ac| {
-                if let Component::AnnotationAssertion(AnnotationAssertion { subject, ann }) =
-                    &ac.component
+                if let Component::AnnotationAssertion(AnnotationAssertion {
+                    subject: AnnotationSubject::IRI(s_iri),
+                    ann,
+                }) = &ac.component
                 {
-                    if let AnnotationSubject::IRI(s_iri) = subject {
-                        let s_str: &str = s_iri.as_ref();
-                        let ann_prop_str: &str = ann.ap.0.as_ref();
-                        if (s_str == subject_iri.as_str() || s_str == iri)
-                            && ann_prop_str == label_prop_iri.as_str()
-                        {
-                            return Some(annotation_value_to_string(&ann.av));
-                        }
+                    let s_str: &str = s_iri.as_ref();
+                    let ann_prop_str: &str = ann.ap.0.as_ref();
+                    if (s_str == subject_iri.as_str() || s_str == iri)
+                        && ann_prop_str == label_prop_iri.as_str()
+                    {
+                        return Some(annotation_value_to_string(&ann.av));
                     }
                 }
                 None
@@ -401,15 +395,15 @@ impl OwlApi {
         self.ontology
             .iter()
             .filter_map(|ac| {
-                if let Component::AnnotationAssertion(AnnotationAssertion { subject, ann }) =
-                    &ac.component
+                if let Component::AnnotationAssertion(AnnotationAssertion {
+                    subject: AnnotationSubject::IRI(s_iri),
+                    ann,
+                }) = &ac.component
                 {
-                    if let AnnotationSubject::IRI(s_iri) = subject {
-                        let s_str: &str = s_iri.as_ref();
-                        let ann_prop_str: &str = ann.ap.0.as_ref();
-                        if s_str == iri && ann_prop_str == label_prop_iri {
-                            return Some(annotation_value_to_string(&ann.av));
-                        }
+                    let s_str: &str = s_iri.as_ref();
+                    let ann_prop_str: &str = ann.ap.0.as_ref();
+                    if s_str == iri && ann_prop_str == label_prop_iri {
+                        return Some(annotation_value_to_string(&ann.av));
                     }
                 }
                 None
@@ -452,11 +446,34 @@ fn parse_bytes(
             let cursor = Cursor::new(content);
             let mut reader = BufReader::new(cursor);
             let (rdf_onto, _incomplete): (
-                horned_owl::io::rdf::reader::ConcreteRDFOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>>,
+                horned_owl::io::rdf::reader::ConcreteRDFOntology<
+                    ArcStr,
+                    Arc<AnnotatedComponent<ArcStr>>,
+                >,
                 _,
             ) = rdf_read(&mut reader, build, ParserConfiguration::default())?;
             let onto: SetOntology<ArcStr> = rdf_onto.into();
             Ok((onto, PrefixMapping::default()))
+        }
+    }
+}
+
+fn annotation_value_to_string(av: &AnnotationValue<ArcStr>) -> String {
+    match av {
+        AnnotationValue::Literal(lit) => match lit {
+            Literal::Simple { literal } => literal.clone(),
+            Literal::Language { literal, lang } => {
+                format!("{}@{}", literal, lang)
+            }
+            Literal::Datatype { literal, .. } => literal.clone(),
+        },
+        AnnotationValue::IRI(iri) => {
+            let s: &str = iri.as_ref();
+            s.to_string()
+        }
+        AnnotationValue::AnonymousIndividual(ai) => {
+            let s: &str = ai.0.as_ref();
+            s.to_string()
         }
     }
 }
@@ -488,21 +505,30 @@ mod tests {
     fn detect_format_by_extension_ofn() {
         use std::path::Path;
         let content = b"Ontology()";
-        assert_eq!(detect_format(Path::new("x.ofn"), content), OntologyFormat::Ofn);
+        assert_eq!(
+            detect_format(Path::new("x.ofn"), content),
+            OntologyFormat::Ofn
+        );
     }
 
     #[test]
     fn detect_format_by_extension_owl_xml_sniff() {
         use std::path::Path;
         let content = b"<?xml version=\"1.0\"?><rdf:RDF>";
-        assert_eq!(detect_format(Path::new("x.owl"), content), OntologyFormat::Rdf);
+        assert_eq!(
+            detect_format(Path::new("x.owl"), content),
+            OntologyFormat::Rdf
+        );
     }
 
     #[test]
     fn detect_format_owl_extension_ofn_content() {
         use std::path::Path;
         let content = b"Ontology()";
-        assert_eq!(detect_format(Path::new("x.owl"), content), OntologyFormat::Ofn);
+        assert_eq!(
+            detect_format(Path::new("x.owl"), content),
+            OntologyFormat::Ofn
+        );
     }
 
     // ── load ─────────────────────────────────────────────────────────────────
@@ -556,10 +582,8 @@ mod tests {
             .unwrap();
         api.add_axiom("Declaration(Class(<http://example.org/Dog>))")
             .unwrap();
-        api.add_axiom(
-            "SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)",
-        )
-        .unwrap();
+        api.add_axiom("SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)")
+            .unwrap();
         let axioms = api.get_all_axioms(100, false, None);
         assert_eq!(axioms.len(), 3);
         assert!(axioms.iter().any(|s| s.contains("SubClassOf")));
@@ -633,10 +657,8 @@ mod tests {
             .unwrap();
         api.add_axiom("Declaration(Class(<http://example.org/Cat>))")
             .unwrap();
-        api.add_axiom(
-            "SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)",
-        )
-        .unwrap();
+        api.add_axiom("SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)")
+            .unwrap();
 
         let results = api.find_axioms("SubClassOf", 100, false, None).unwrap();
         assert_eq!(results.len(), 1);
@@ -648,11 +670,8 @@ mod tests {
         let f = empty_ofn();
         let mut api = OwlApi::load(f.path(), false, false).unwrap();
         for i in 0..10 {
-            api.add_axiom(&format!(
-                "Declaration(Class(<http://example.org/C{}>))",
-                i
-            ))
-            .unwrap();
+            api.add_axiom(&format!("Declaration(Class(<http://example.org/C{}>))", i))
+                .unwrap();
         }
         let results = api.find_axioms("Declaration", 3, false, None).unwrap();
         assert_eq!(results.len(), 3);
@@ -680,11 +699,8 @@ mod tests {
         let f = empty_ofn();
         let mut api = OwlApi::load(f.path(), false, false).unwrap();
         for i in 0..5 {
-            api.add_axiom(&format!(
-                "Declaration(Class(<http://example.org/X{}>))",
-                i
-            ))
-            .unwrap();
+            api.add_axiom(&format!("Declaration(Class(<http://example.org/X{}>))", i))
+                .unwrap();
         }
         assert_eq!(api.get_all_axioms(2, false, None).len(), 2);
         assert_eq!(api.get_all_axioms(100, false, None).len(), 5);
@@ -749,10 +765,8 @@ Ontology(
             let mut api = OwlApi::load(f.path(), false, false).unwrap();
             api.add_axiom("Declaration(Class(<http://example.org/Dog>))")
                 .unwrap();
-            api.add_axiom(
-                "SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)",
-            )
-            .unwrap();
+            api.add_axiom("SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)")
+                .unwrap();
         }
         // Load fresh from disk
         let api2 = OwlApi::load(f.path(), false, false).unwrap();
@@ -814,25 +828,5 @@ Ontology(
         let api = OwlApi::load(f.path(), false, false).unwrap();
         let expanded = api.expand_curie("unknown:Dog");
         assert_eq!(expanded, "unknown:Dog");
-    }
-}
-
-fn annotation_value_to_string(av: &AnnotationValue<ArcStr>) -> String {
-    match av {
-        AnnotationValue::Literal(lit) => match lit {
-            Literal::Simple { literal } => literal.clone(),
-            Literal::Language { literal, lang } => {
-                format!("{}@{}", literal, lang)
-            }
-            Literal::Datatype { literal, .. } => literal.clone(),
-        },
-        AnnotationValue::IRI(iri) => {
-            let s: &str = iri.as_ref();
-            s.to_string()
-        }
-        AnnotationValue::AnonymousIndividual(ai) => {
-            let s: &str = ai.0.as_ref();
-            s.to_string()
-        }
     }
 }
