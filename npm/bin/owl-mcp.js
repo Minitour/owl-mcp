@@ -31,6 +31,11 @@ function tryResolveBinary() {
       if (pkg && pkg.binaryPath) {
         return pkg.binaryPath;
       }
+    } catch {
+      // package may not have a main entry — fall through
+    }
+
+    try {
       const pkgDir = path.dirname(require.resolve(`${packageName}/package.json`));
       const candidate = path.join(pkgDir, "bin", BINARY_NAME);
       if (fs.existsSync(candidate)) return candidate;
