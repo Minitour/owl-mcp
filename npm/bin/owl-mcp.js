@@ -11,8 +11,7 @@ const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-// Map Node.js platform/arch to the npm package suffix
-const PLATFORM_PACKAGES: Record<string, string> = {
+const PLATFORM_PACKAGES = {
   "linux-x64": "@owl-mcp/owl-mcp-linux-x64",
   "linux-arm64": "@owl-mcp/owl-mcp-linux-arm64",
   "darwin-x64": "@owl-mcp/owl-mcp-darwin-x64",
@@ -24,12 +23,12 @@ const BINARY_NAME = process.platform === "win32" ? "owl-mcp.exe" : "owl-mcp";
 const platformKey = `${process.platform}-${process.arch}`;
 const packageName = PLATFORM_PACKAGES[platformKey];
 
-function tryResolveBinary(): string | null {
+function tryResolveBinary() {
   // 1. Try the platform-specific optional package
   if (packageName) {
     try {
-      const pkg = require(packageName) as { binaryPath?: string } | undefined;
-      if (pkg?.binaryPath) {
+      const pkg = require(packageName);
+      if (pkg && pkg.binaryPath) {
         return pkg.binaryPath;
       }
       const pkgDir = path.dirname(require.resolve(`${packageName}/package.json`));

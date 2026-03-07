@@ -8,7 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const PLATFORM_PACKAGES: Record<string, string> = {
+const PLATFORM_PACKAGES = {
   "linux-x64": "@owl-mcp/owl-mcp-linux-x64",
   "linux-arm64": "@owl-mcp/owl-mcp-linux-arm64",
   "darwin-x64": "@owl-mcp/owl-mcp-darwin-x64",

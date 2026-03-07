@@ -15,6 +15,7 @@ pub enum ConfigError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OntologyConfigInfo {
+    #[serde(default)]
     pub name: String,
     pub path: String,
     #[serde(default)]
@@ -44,7 +45,12 @@ impl OWLMcpConfig {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(&path)?;
-        let config: OWLMcpConfig = serde_yaml::from_str(&content)?;
+        let mut config: OWLMcpConfig = serde_yaml::from_str(&content)?;
+        for (key, info) in config.ontologies.iter_mut() {
+            if info.name.is_empty() {
+                info.name = key.clone();
+            }
+        }
         Ok(config)
     }
 
@@ -198,6 +204,26 @@ ontologies:
         assert!(!got.readonly);
         assert!(got.description.is_none());
         assert!(got.metadata_axioms.is_empty());
+    }
+
+    #[test]
+    fn yaml_deserialization_without_name_field() {
+        let yaml = r#"
+ontologies:
+  agentic-ai:
+    path: /data/agentic-ai.ofn
+    description: Agentic AI ontology
+    readonly: false
+"#;
+        let mut cfg: OWLMcpConfig = serde_yaml::from_str(yaml).unwrap();
+        for (key, info) in cfg.ontologies.iter_mut() {
+            if info.name.is_empty() {
+                info.name = key.clone();
+            }
+        }
+        let got = cfg.get_ontology("agentic-ai").unwrap();
+        assert_eq!(got.name, "agentic-ai");
+        assert_eq!(got.path, "/data/agentic-ai.ofn");
     }
 
     // ── file save / load ──────────────────────────────────────────────────────

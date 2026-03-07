@@ -21,10 +21,10 @@
     "README.md"
   ],
   "bin": {
-    "owl-mcp": "./bin/owl-mcp.ts"
+    "owl-mcp": "./bin/owl-mcp.js"
   },
   "scripts": {
-    "postinstall": "node ./bin/install.ts"
+    "postinstall": "node ./bin/install.js"
   },
   "optionalDependencies": {
     "@owl-mcp/owl-mcp-linux-x64": "1.0.0",
@@ -34,6 +34,6 @@
     "@owl-mcp/owl-mcp-win32-x64": "1.0.0"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=18"
   }
 }
