@@ -171,7 +171,21 @@ jobs:
           }
           PKGJSON
 
-            npm publish "./pkg-${PLATFORM}" --access public
+            set +e
+            OUTPUT=$(npm publish "./pkg-${PLATFORM}" --access public 2>&1)
+            EXIT_CODE=$?
+            set -e
+
+            if [ $EXIT_CODE -ne 0 ]; then
+              if echo "$OUTPUT" | grep -q "You cannot publish over the previously published versions"; then
+                echo "Skipping ${PKG_NAME}@${VERSION} (already published)"
+              else
+                echo "$OUTPUT" >&2
+                exit $EXIT_CODE
+              fi
+            else
+              echo "$OUTPUT"
+            fi
             sleep 10
           done
 
@@ -193,7 +207,21 @@ jobs:
             }
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
-          npm publish --access public
+          set +e
+          OUTPUT=$(npm publish --access public 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            if echo "$OUTPUT" | grep -q "You cannot publish over the previously published versions"; then
+              echo "Skipping owl-mcp@${VERSION} (already published)"
+            else
+              echo "$OUTPUT" >&2
+              exit $EXIT_CODE
+            fi
+          else
+            echo "$OUTPUT"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
