@@ -177,7 +177,7 @@ jobs:
             set -e
 
             if [ $EXIT_CODE -ne 0 ]; then
-              if echo "$OUTPUT" | grep -q "You cannot publish over the previously published versions"; then
+              if echo "$OUTPUT" | grep -qi "previously published version"; then
                 echo "Skipping ${PKG_NAME}@${VERSION} (already published)"
               else
                 echo "$OUTPUT" >&2
@@ -213,7 +213,7 @@ jobs:
           set -e
 
           if [ $EXIT_CODE -ne 0 ]; then
-            if echo "$OUTPUT" | grep -q "You cannot publish over the previously published versions"; then
+            if echo "$OUTPUT" | grep -qi "previously published version"; then
               echo "Skipping owl-mcp@${VERSION} (already published)"
             else
               echo "$OUTPUT" >&2
