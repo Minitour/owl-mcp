@@ -1,4 +1,10 @@
-# owl-mcp
+# OWL MCP
+
+[![npm version](https://img.shields.io/npm/v/owl-mcp.svg)](https://www.npmjs.com/package/owl-mcp)
+[![CI](https://github.com/Minitour/owl-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Minitour/owl-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
 
 A high-performance [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for OWL ontology management, written in Rust.
 
