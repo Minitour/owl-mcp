@@ -196,52 +196,121 @@ pub fn scan(ontology: &SetOntology<ArcStr>, filter: Option<&HashSet<String>>) ->
 // ── P04: Creating unconnected ontology elements ──────────────────────────────
 
 fn check_p04(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
-    let mut declared: HashSet<String> = HashSet::new();
-    let mut referenced: HashSet<String> = HashSet::new();
+    let mut declared_classes: HashSet<String> = HashSet::new();
+    let mut declared_obj_props: HashSet<String> = HashSet::new();
+    let mut declared_data_props: HashSet<String> = HashSet::new();
+    let mut referenced_classes: HashSet<String> = HashSet::new();
+    let mut referenced_props: HashSet<String> = HashSet::new();
 
     for ac in ontology.iter() {
         match &ac.component {
             Component::DeclareClass(dc) => {
                 let iri = dc.0 .0.as_ref();
                 if !is_standard(iri) {
-                    declared.insert(iri.to_string());
+                    declared_classes.insert(iri.to_string());
+                }
+            }
+            Component::DeclareObjectProperty(dop) => {
+                let iri = dop.0 .0.as_ref();
+                if !is_standard(iri) {
+                    declared_obj_props.insert(iri.to_string());
+                }
+            }
+            Component::DeclareDataProperty(ddp) => {
+                let iri = ddp.0 .0.as_ref();
+                if !is_standard(iri) {
+                    declared_data_props.insert(iri.to_string());
                 }
             }
             Component::SubClassOf(ax) => {
-                referenced.extend(collect_class_iris(&ax.sub));
-                referenced.extend(collect_class_iris(&ax.sup));
+                referenced_classes.extend(collect_class_iris(&ax.sub));
+                referenced_classes.extend(collect_class_iris(&ax.sup));
             }
             Component::EquivalentClasses(ax) => {
                 for ce in &ax.0 {
-                    referenced.extend(collect_class_iris(ce));
+                    referenced_classes.extend(collect_class_iris(ce));
                 }
             }
             Component::DisjointClasses(ax) => {
                 for ce in &ax.0 {
-                    referenced.extend(collect_class_iris(ce));
+                    referenced_classes.extend(collect_class_iris(ce));
                 }
             }
             Component::ObjectPropertyDomain(ax) => {
-                referenced.extend(collect_class_iris(&ax.ce));
+                referenced_classes.extend(collect_class_iris(&ax.ce));
+                referenced_props.insert(ope_iri(&ax.ope).to_string());
             }
             Component::ObjectPropertyRange(ax) => {
-                referenced.extend(collect_class_iris(&ax.ce));
+                referenced_classes.extend(collect_class_iris(&ax.ce));
+                referenced_props.insert(ope_iri(&ax.ope).to_string());
             }
             Component::DataPropertyDomain(ax) => {
-                referenced.extend(collect_class_iris(&ax.ce));
+                referenced_classes.extend(collect_class_iris(&ax.ce));
+                referenced_props.insert(ax.dp.0.as_ref().to_string());
+            }
+            Component::DataPropertyRange(ax) => {
+                referenced_props.insert(ax.dp.0.as_ref().to_string());
+            }
+            Component::SubObjectPropertyOf(ax) => {
+                referenced_props.insert(ope_iri(&ax.sup).to_string());
+                if let SubObjectPropertyExpression::ObjectPropertyExpression(sub) = &ax.sub {
+                    referenced_props.insert(ope_iri(sub).to_string());
+                }
+            }
+            Component::SubDataPropertyOf(ax) => {
+                referenced_props.insert(ax.sub.0.as_ref().to_string());
+                referenced_props.insert(ax.sup.0.as_ref().to_string());
+            }
+            Component::InverseObjectProperties(ax) => {
+                referenced_props.insert(ax.0 .0.as_ref().to_string());
+                referenced_props.insert(ax.1 .0.as_ref().to_string());
+            }
+            Component::EquivalentObjectProperties(ax) => {
+                for ope in &ax.0 {
+                    referenced_props.insert(ope_iri(ope).to_string());
+                }
+            }
+            Component::DisjointObjectProperties(ax) => {
+                for ope in &ax.0 {
+                    referenced_props.insert(ope_iri(ope).to_string());
+                }
+            }
+            Component::EquivalentDataProperties(ax) => {
+                for dp in &ax.0 {
+                    referenced_props.insert(dp.0.as_ref().to_string());
+                }
+            }
+            Component::DisjointDataProperties(ax) => {
+                for dp in &ax.0 {
+                    referenced_props.insert(dp.0.as_ref().to_string());
+                }
             }
             Component::ClassAssertion(ax) => {
-                referenced.extend(collect_class_iris(&ax.ce));
+                referenced_classes.extend(collect_class_iris(&ax.ce));
+            }
+            Component::ObjectPropertyAssertion(ax) => {
+                referenced_props.insert(ope_iri(&ax.ope).to_string());
+            }
+            Component::DataPropertyAssertion(ax) => {
+                referenced_props.insert(ax.dp.0.as_ref().to_string());
             }
             _ => {}
         }
     }
 
-    let unconnected: Vec<String> = declared
+    let mut unconnected: Vec<String> = declared_classes
         .iter()
-        .filter(|iri| !referenced.contains(iri.as_str()))
+        .filter(|iri| !referenced_classes.contains(iri.as_str()))
         .cloned()
         .collect();
+
+    unconnected.extend(
+        declared_obj_props
+            .iter()
+            .chain(declared_data_props.iter())
+            .filter(|iri| !referenced_props.contains(iri.as_str()))
+            .cloned(),
+    );
 
     if unconnected.is_empty() {
         return vec![];
@@ -575,14 +644,15 @@ fn check_p19(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
 // ── P22: Using different naming conventions ──────────────────────────────────
 
 fn check_p22(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
-    let mut style_counts: HashMap<NamingStyle, Vec<String>> = HashMap::new();
+    let mut class_styles: HashMap<NamingStyle, Vec<String>> = HashMap::new();
+    let mut prop_styles: HashMap<NamingStyle, Vec<String>> = HashMap::new();
 
     for ac in ontology.iter() {
-        let iri = match &ac.component {
-            Component::DeclareClass(dc) => Some(dc.0 .0.as_ref()),
-            Component::DeclareObjectProperty(dop) => Some(dop.0 .0.as_ref()),
-            Component::DeclareDataProperty(ddp) => Some(ddp.0 .0.as_ref()),
-            _ => None,
+        let (iri, is_class) = match &ac.component {
+            Component::DeclareClass(dc) => (Some(dc.0 .0.as_ref()), true),
+            Component::DeclareObjectProperty(dop) => (Some(dop.0 .0.as_ref()), false),
+            Component::DeclareDataProperty(ddp) => (Some(ddp.0 .0.as_ref()), false),
+            _ => (None, false),
         };
 
         if let Some(iri) = iri {
@@ -592,27 +662,35 @@ fn check_p22(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
             let name = local_name(iri);
             let style = detect_naming_style(name);
             if style != NamingStyle::Unknown {
-                style_counts.entry(style).or_default().push(iri.to_string());
+                let map = if is_class {
+                    &mut class_styles
+                } else {
+                    &mut prop_styles
+                };
+                map.entry(style).or_default().push(iri.to_string());
             }
         }
     }
 
-    let distinct_styles: Vec<&NamingStyle> = style_counts.keys().collect();
-    if distinct_styles.len() <= 1 {
-        return vec![];
+    let mut affected: Vec<String> = Vec::new();
+    if class_styles.len() > 1 {
+        affected.extend(class_styles.values().flatten().cloned());
+    }
+    if prop_styles.len() > 1 {
+        affected.extend(prop_styles.values().flatten().cloned());
     }
 
-    let affected: Vec<String> = style_counts.values().flatten().cloned().collect();
+    if affected.is_empty() {
+        return vec![];
+    }
 
     vec![DetectedPitfall {
         id: "P22".to_string(),
         title: "Using different naming conventions".to_string(),
-        description: format!(
-            "The ontology uses {} different naming conventions across its entities. \
-             Consistent naming (e.g. all UpperCamelCase for classes, lowerCamelCase for properties) \
-             improves readability and interoperability.",
-            distinct_styles.len()
-        ),
+        description: "The ontology uses mixed naming conventions within the same entity type. \
+                      Classes should follow a consistent style (e.g. UpperCamelCase) and \
+                      properties should follow a consistent style (e.g. lowerCamelCase)."
+            .to_string(),
         importance: "Minor".to_string(),
         num_affected_elements: affected.len(),
         affected_elements: affected,
