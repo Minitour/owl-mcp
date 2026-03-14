@@ -646,11 +646,17 @@ impl LoadAndRegisterOntology {
     name = "test_pitfalls",
     description = "Scan an OWL ontology for common modeling pitfalls (inspired by OOPS! - OntOlogy Pitfall Scanner). \
     Returns a JSON report listing detected issues, their severity, and affected elements. \
-    Checks include: P04 (unconnected elements), P08 (missing annotations), P10 (missing disjointness), \
-    P11 (missing domain/range), P13 (missing inverses), P19 (multiple domains/ranges), \
+    31 checks: P02 (synonym classes), P03 (\"is\" relationship), P04 (unconnected elements), \
+    P05 (wrong inverses), P06 (class hierarchy cycles), P07 (merged concepts), \
+    P08 (missing annotations), P10 (missing disjointness), P11 (missing domain/range), \
+    P12 (undeclared equivalent properties), P13 (missing inverses, with sub-variants Y/N/S), \
+    P19 (multiple domains/ranges), P20 (misused annotations), P21 (miscellaneous class), \
     P22 (inconsistent naming), P24 (recursive definitions), P25 (self-inverse), \
-    P34 (untyped class), P35 (untyped property), P36 (URI file extension), \
-    P38 (no ontology declaration), P41 (no license)."
+    P26 (inverse of symmetric), P27 (wrong equivalent properties), P28 (wrong symmetric), \
+    P29 (wrong transitive), P30 (undeclared equivalent classes), P31 (wrong equivalent classes), \
+    P32 (duplicate labels), P33 (single-property chain), P34 (untyped class), \
+    P35 (untyped property), P36 (URI file extension), P38 (no ontology declaration), \
+    P39 (ambiguous namespace), P41 (no license)."
 )]
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct TestPitfalls {
