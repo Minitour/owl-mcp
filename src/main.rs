@@ -1,6 +1,7 @@
 mod config;
 mod handler;
 mod ontology;
+mod pitfalls;
 mod tools;
 
 use std::sync::Arc;

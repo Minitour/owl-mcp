@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use rust_mcp_sdk::{
@@ -639,6 +640,68 @@ impl LoadAndRegisterOntology {
     }
 }
 
+// ── Pitfall scanner ────────────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "test_pitfalls",
+    description = "Scan an OWL ontology for common modeling pitfalls (inspired by OOPS! - OntOlogy Pitfall Scanner). \
+    Returns a JSON report listing detected issues, their severity, and affected elements. \
+    31 checks: P02 (synonym classes), P03 (\"is\" relationship), P04 (unconnected elements), \
+    P05 (wrong inverses), P06 (class hierarchy cycles), P07 (merged concepts), \
+    P08 (missing annotations), P10 (missing disjointness), P11 (missing domain/range), \
+    P12 (undeclared equivalent properties), P13 (missing inverses, with sub-variants Y/N/S), \
+    P19 (multiple domains/ranges), P20 (misused annotations), P21 (miscellaneous class), \
+    P22 (inconsistent naming), P24 (recursive definitions), P25 (self-inverse), \
+    P26 (inverse of symmetric), P27 (wrong equivalent properties), P28 (wrong symmetric), \
+    P29 (wrong transitive), P30 (undeclared equivalent classes), P31 (wrong equivalent classes), \
+    P32 (duplicate labels), P33 (single-property chain), P34 (untyped class), \
+    P35 (untyped property), P36 (URI file extension), P38 (no ontology declaration), \
+    P39 (ambiguous namespace), P41 (no license)."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct TestPitfalls {
+    /// Absolute path to the OWL file (provide either this or ontology_name)
+    pub owl_file_path: Option<String>,
+    /// Name of a configured ontology (provide either this or owl_file_path)
+    pub ontology_name: Option<String>,
+    /// Comma-separated list of pitfall IDs to check (e.g. "P04,P08,P11"). If omitted, all checks run.
+    pub pitfalls: Option<String>,
+}
+
+impl TestPitfalls {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = if let Some(name) = &params.ontology_name {
+            mgr.get_or_load_by_name(name).map_err(CallToolError::new)?
+        } else if let Some(path) = &params.owl_file_path {
+            mgr.get_or_load(path, false, false)
+                .map_err(CallToolError::new)?
+        } else {
+            return Err(CallToolError::new(
+                crate::ontology::owl_api::OwlApiError::Parse(
+                    "Provide either owl_file_path or ontology_name".to_string(),
+                ),
+            ));
+        };
+
+        let filter = params.pitfalls.as_ref().map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_uppercase())
+                .collect::<HashSet<_>>()
+        });
+
+        let report = crate::pitfalls::scan(&api.ontology, filter.as_ref());
+        let json = serde_json::to_string_pretty(&report).map_err(|e| {
+            CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(e.to_string()))
+        })?;
+
+        text_result(json)
+    }
+}
+
 // ── Tool box (enum + dispatch) ─────────────────────────────────────────────────
 
 fn default_limit() -> u64 {
@@ -671,5 +734,6 @@ tool_box!(
         GetOntologyConfig,
         RegisterOntologyInConfig,
         LoadAndRegisterOntology,
+        TestPitfalls,
     ]
 );

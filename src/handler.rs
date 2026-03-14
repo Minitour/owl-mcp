@@ -73,6 +73,7 @@ impl ServerHandler for OwlMcpHandler {
                 RegisterOntologyInConfig::run_tool(p, mgr).await
             }
             OwlTools::LoadAndRegisterOntology(p) => LoadAndRegisterOntology::run_tool(p, mgr).await,
+            OwlTools::TestPitfalls(p) => TestPitfalls::run_tool(p, mgr).await,
         }
     }
 
