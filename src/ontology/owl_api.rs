@@ -11,7 +11,7 @@ use horned_owl::io::rdf::writer::write as rdf_write;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{
     AnnotatedComponent, AnnotationAssertion, AnnotationSubject, AnnotationValue, ArcStr, Build,
-    Component, Literal, MutableOntology,
+    Component, Literal, MutableOntology, OntologyID,
 };
 use horned_owl::ontology::component_mapped::ComponentMappedOntology;
 use horned_owl::ontology::set::SetOntology;
@@ -277,6 +277,49 @@ impl OwlApi {
         }
         self.save()?;
         Ok(format!("Added prefix {}=<{}>", prefix, uri))
+    }
+
+    pub fn set_ontology_iri(
+        &mut self,
+        iri: Option<&str>,
+        version_iri: Option<&str>,
+    ) -> Result<String, OwlApiError> {
+        if self.readonly {
+            return Err(OwlApiError::ReadOnly);
+        }
+
+        let old_ids: Vec<AnnotatedComponent<ArcStr>> = self
+            .ontology
+            .iter()
+            .filter(|ac| matches!(ac.component, Component::OntologyID(_)))
+            .cloned()
+            .collect();
+        for ac in &old_ids {
+            self.ontology.remove(ac);
+        }
+
+        let new_iri = iri.map(|s| self.build.iri(self.expand_curie(s)));
+        let new_viri = version_iri.map(|s| self.build.iri(self.expand_curie(s)));
+        let oid = OntologyID {
+            iri: new_iri,
+            viri: new_viri,
+        };
+        self.ontology
+            .insert(AnnotatedComponent::from(Component::OntologyID(oid)));
+        self.save()?;
+
+        let mut parts = Vec::new();
+        if let Some(i) = iri {
+            parts.push(format!("IRI set to <{}>", i));
+        }
+        if let Some(v) = version_iri {
+            parts.push(format!("version IRI set to <{}>", v));
+        }
+        if parts.is_empty() {
+            Ok("Ontology IRI cleared".to_string())
+        } else {
+            Ok(parts.join(", "))
+        }
     }
 
     pub fn get_labels_for_iri(&self, iri: &str, annotation_property: Option<&str>) -> Vec<String> {
@@ -810,6 +853,88 @@ Ontology(
         // At least the SubClassOf-like axiom should have a label comment
         let has_label_comment = axioms.iter().any(|s| s.contains("##") || s.contains("dog"));
         assert!(has_label_comment);
+    }
+
+    // ── set_ontology_iri ──────────────────────────────────────────────────────
+
+    #[test]
+    fn set_ontology_iri_on_empty_ontology() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        let msg = api
+            .set_ontology_iri(Some("http://example.org/my-onto"), None)
+            .unwrap();
+        assert!(msg.contains("IRI set to"));
+        let meta = api.ontology_metadata();
+        let joined = meta.join(" ");
+        assert!(joined.contains("http://example.org/my-onto"));
+    }
+
+    #[test]
+    fn set_ontology_iri_with_version() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        let msg = api
+            .set_ontology_iri(
+                Some("http://example.org/onto"),
+                Some("http://example.org/onto/1.0"),
+            )
+            .unwrap();
+        assert!(msg.contains("IRI set to"));
+        assert!(msg.contains("version IRI set to"));
+        let meta = api.ontology_metadata();
+        let joined = meta.join(" ");
+        assert!(joined.contains("http://example.org/onto"));
+        assert!(joined.contains("http://example.org/onto/1.0"));
+    }
+
+    #[test]
+    fn set_ontology_iri_replaces_existing() {
+        let content = "Ontology(<http://old.example.org/onto>)\n";
+        let f = ofn_with_content(content);
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        let meta_before = api.ontology_metadata();
+        assert!(meta_before.iter().any(|s| s.contains("old.example.org")));
+
+        api.set_ontology_iri(Some("http://new.example.org/onto"), None)
+            .unwrap();
+        let meta_after = api.ontology_metadata();
+        assert!(!meta_after.iter().any(|s| s.contains("old.example.org")));
+        assert!(meta_after.iter().any(|s| s.contains("new.example.org")));
+    }
+
+    #[test]
+    fn set_ontology_iri_persists_across_reload() {
+        let f = empty_ofn();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            api.set_ontology_iri(Some("http://example.org/persisted"), None)
+                .unwrap();
+        }
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let meta = api2.ontology_metadata();
+        assert!(meta
+            .iter()
+            .any(|s| s.contains("http://example.org/persisted")));
+    }
+
+    #[test]
+    fn set_ontology_iri_clear() {
+        let content = "Ontology(<http://example.org/will-clear>)\n";
+        let f = ofn_with_content(content);
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        let msg = api.set_ontology_iri(None, None).unwrap();
+        assert!(msg.contains("cleared"));
+        let meta = api.ontology_metadata();
+        assert!(!meta.iter().any(|s| s.contains("will-clear")));
+    }
+
+    #[test]
+    fn set_ontology_iri_readonly_returns_error() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), true, false).unwrap();
+        let result = api.set_ontology_iri(Some("http://example.org/x"), None);
+        assert!(matches!(result, Err(OwlApiError::ReadOnly)));
     }
 
     // ── expand_curie ─────────────────────────────────────────────────────────

@@ -58,11 +58,13 @@ impl ServerHandler for OwlMcpHandler {
             OwlTools::AddPrefix(p) => AddPrefix::run_tool(p, mgr).await,
             OwlTools::OntologyMetadata(p) => OntologyMetadata::run_tool(p, mgr).await,
             OwlTools::GetLabelsForIri(p) => GetLabelsForIri::run_tool(p, mgr).await,
+            OwlTools::SetOntologyIri(p) => SetOntologyIri::run_tool(p, mgr).await,
             OwlTools::AddAxiomByName(p) => AddAxiomByName::run_tool(p, mgr).await,
             OwlTools::RemoveAxiomByName(p) => RemoveAxiomByName::run_tool(p, mgr).await,
             OwlTools::FindAxiomsByName(p) => FindAxiomsByName::run_tool(p, mgr).await,
             OwlTools::AddPrefixByName(p) => AddPrefixByName::run_tool(p, mgr).await,
             OwlTools::GetLabelsForIriByName(p) => GetLabelsForIriByName::run_tool(p, mgr).await,
+            OwlTools::SetOntologyIriByName(p) => SetOntologyIriByName::run_tool(p, mgr).await,
             OwlTools::ListConfiguredOntologies(p) => {
                 ListConfiguredOntologies::run_tool(p, mgr).await
             }
