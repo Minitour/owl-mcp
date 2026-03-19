@@ -249,9 +249,9 @@ pub enum CliCommand {
         /// Mark the ontology as read-only
         #[arg(long)]
         readonly: bool,
-        /// Create the file if it does not exist
-        #[arg(long, default_value_t = true)]
-        create_if_not_exists: bool,
+        /// Do NOT create the file if it does not exist (by default, the file is created)
+        #[arg(long)]
+        no_create: bool,
         /// Human-readable description
         #[arg(long)]
         description: Option<String>,
@@ -521,7 +521,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             file,
             name,
             readonly,
-            create_if_not_exists,
+            no_create,
             description,
             preferred_serialization,
             metadata_axioms,
@@ -537,7 +537,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                     owl_file_path: file,
                     name,
                     readonly,
-                    create_if_not_exists,
+                    create_if_not_exists: !no_create,
                     description,
                     preferred_serialization,
                     metadata_axioms: meta,
