@@ -1,3 +1,4 @@
+mod cli;
 mod config;
 mod handler;
 mod ontology;
@@ -6,7 +7,7 @@ mod tools;
 
 use std::sync::Arc;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use handler::OwlMcpHandler;
 use ontology::{manager::OntologyManager, watcher::spawn_watcher};
 use rust_mcp_sdk::{
@@ -29,24 +30,36 @@ enum Transport {
 #[command(
     name = "owl-mcp",
     version,
-    about = "High-performance MCP server for OWL ontology management"
+    about = "High-performance MCP server and CLI for OWL ontology management"
 )]
 struct Args {
-    /// Transport to use
-    #[arg(long, default_value = "stdio", env = "OWL_MCP_TRANSPORT")]
-    transport: Transport,
+    #[command(subcommand)]
+    command: Command,
+}
 
-    /// Host to bind (HTTP transport only)
-    #[arg(long, default_value = "127.0.0.1", env = "OWL_MCP_HOST")]
-    host: String,
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Start the MCP server (stdio or HTTP transport)
+    Serve {
+        /// Transport to use
+        #[arg(long, default_value = "stdio", env = "OWL_MCP_TRANSPORT")]
+        transport: Transport,
 
-    /// Port to bind (HTTP transport only)
-    #[arg(long, default_value_t = 8080, env = "OWL_MCP_PORT")]
-    port: u16,
+        /// Host to bind (HTTP transport only)
+        #[arg(long, default_value = "127.0.0.1", env = "OWL_MCP_HOST")]
+        host: String,
 
-    /// Enable legacy SSE endpoint alongside Streamable HTTP (HTTP transport only)
-    #[arg(long, default_value_t = true, env = "OWL_MCP_SSE_SUPPORT")]
-    sse_support: bool,
+        /// Port to bind (HTTP transport only)
+        #[arg(long, default_value_t = 8080, env = "OWL_MCP_PORT")]
+        port: u16,
+
+        /// Enable legacy SSE endpoint alongside Streamable HTTP (HTTP transport only)
+        #[arg(long, default_value_t = true, env = "OWL_MCP_SSE_SUPPORT")]
+        sse_support: bool,
+    },
+
+    #[command(flatten)]
+    Cli(cli::CliCommand),
 }
 
 fn server_info() -> InitializeResult {
@@ -86,7 +99,6 @@ fn server_info() -> InitializeResult {
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing (logs go to stderr so they don't interfere with stdio MCP transport)
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -97,7 +109,6 @@ async fn main() {
 
     let args = Args::parse();
 
-    // Build shared state
     let manager = match OntologyManager::new() {
         Ok(m) => Arc::new(Mutex::new(m)),
         Err(e) => {
@@ -106,23 +117,33 @@ async fn main() {
         }
     };
 
-    // Spawn file watcher background task
-    let _watcher = spawn_watcher(manager.clone());
+    match args.command {
+        Command::Serve {
+            transport,
+            host,
+            port,
+            sse_support,
+        } => {
+            let _watcher = spawn_watcher(manager.clone());
+            let handler = OwlMcpHandler::new(manager);
 
-    let handler = OwlMcpHandler::new(manager);
-
-    match args.transport {
-        Transport::Stdio => {
-            if let Err(e) = run_stdio(handler).await {
-                eprintln!("Server error: {}", e);
-                std::process::exit(1);
+            match transport {
+                Transport::Stdio => {
+                    if let Err(e) = run_stdio(handler).await {
+                        eprintln!("Server error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                Transport::Http => {
+                    if let Err(e) = run_http(handler, host, port, sse_support).await {
+                        eprintln!("Server error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
         }
-        Transport::Http => {
-            if let Err(e) = run_http(handler, args.host, args.port, args.sse_support).await {
-                eprintln!("Server error: {}", e);
-                std::process::exit(1);
-            }
+        Command::Cli(cmd) => {
+            cli::dispatch(cmd, manager).await;
         }
     }
 }

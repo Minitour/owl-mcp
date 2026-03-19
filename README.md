@@ -6,13 +6,14 @@
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
 
-A high-performance [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for OWL ontology management, written in Rust.
+A high-performance [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server **and CLI** for OWL ontology management, written in Rust.
 
 Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4curation/owl-mcp), designed to eliminate the crashes and timeouts inherent to the Python implementation. Axioms are expressed in [OWL Functional Syntax](https://www.w3.org/TR/owl2-syntax/).
 
 ## Features
 
-- **19 MCP tools** — add, remove, search, and inspect axioms; manage prefixes and labels; register and configure ontologies
+- **20 MCP tools** — add, remove, search, and inspect axioms; manage prefixes and labels; register and configure ontologies; scan for pitfalls
+- **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
 - **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
 - **Persistent configuration** — register ontologies by name in `~/.owl-mcp/config.yaml`
 - **Live file watching** — automatically reloads ontology files modified externally
@@ -24,7 +25,7 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 ### via npx (recommended)
 
 ```bash
-npx owl-mcp
+npx owl-mcp serve
 ```
 
 ### via npm (global install)
@@ -47,17 +48,34 @@ cargo build --release
 
 ## Usage
 
-```
-owl-mcp [OPTIONS]
+owl-mcp has two modes: **serve** (MCP server) and **CLI** (direct commands).
+
+### MCP server mode
+
+```bash
+owl-mcp serve [OPTIONS]
 
 Options:
-  --transport <stdio|http>   Transport to use [default: stdio] [env: OWL_MCP_TRANSPORT]
-  --host <HOST>              Host to bind (HTTP only) [default: 127.0.0.1] [env: OWL_MCP_HOST]
-  --port <PORT>              Port to bind (HTTP only) [default: 8080] [env: OWL_MCP_PORT]
-  --sse-support              Enable legacy SSE endpoint alongside Streamable HTTP [env: OWL_MCP_SSE_SUPPORT]
-  -h, --help                 Print help
-  -V, --version              Print version
+  --transport <stdio|http>   Transport to use [default: stdio]
+  --host <HOST>              Host to bind (HTTP only) [default: 127.0.0.1]
+  --port <PORT>              Port to bind (HTTP only) [default: 8080]
+  --sse-support              Enable legacy SSE endpoint [default: true]
 ```
+
+### CLI mode
+
+Every MCP tool is available as a subcommand:
+
+```bash
+owl-mcp add-axiom --file ontology.owl --axiom "SubClassOf(:Dog :Animal)"
+owl-mcp find-axioms --file ontology.owl --pattern "Dog" --limit 50
+owl-mcp get-all-axioms --file ontology.owl --include-labels
+owl-mcp test-pitfalls --file ontology.owl
+owl-mcp list-configured-ontologies
+owl-mcp find-axioms-by-name --name pizza --pattern "Topping"
+```
+
+Run `owl-mcp --help` for a full list of commands, or `owl-mcp <command> --help` for details on a specific command.
 
 ## Cursor / Claude Desktop integration
 
@@ -70,7 +88,7 @@ Add the server to your MCP client configuration.
   "mcpServers": {
     "owl-mcp": {
       "command": "npx",
-      "args": ["-y", "owl-mcp"]
+      "args": ["-y", "owl-mcp", "serve"]
     }
   }
 }
@@ -91,7 +109,7 @@ Add the server to your MCP client configuration.
 Start the server with:
 
 ```bash
-owl-mcp --transport http --port 8080
+owl-mcp serve --transport http --port 8080
 ```
 
 ## Tools
@@ -134,6 +152,12 @@ owl-mcp --transport http --port 8080
 | `get_ontology_config` | Retrieve configuration for a named ontology |
 | `register_ontology_in_config` | Register an existing file by name |
 | `load_and_register_ontology` | Load (or create) a file and register it |
+
+### Quality checks
+
+| Tool | Description |
+|---|---|
+| `test_pitfalls` | Scan an ontology for common modeling pitfalls (31 checks) |
 
 All `find_axioms` and `get_all_axioms` tools accept `include_labels: true` to annotate each axiom with human-readable labels appended as `## <IRI> # label` comments.
 
