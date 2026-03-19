@@ -11,7 +11,7 @@ use horned_owl::io::rdf::writer::write as rdf_write;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{
     AnnotatedComponent, AnnotationAssertion, AnnotationSubject, AnnotationValue, ArcStr, Build,
-    Component, Literal, MutableOntology,
+    Component, Literal, MutableOntology, OntologyID,
 };
 use horned_owl::ontology::component_mapped::ComponentMappedOntology;
 use horned_owl::ontology::set::SetOntology;
@@ -277,6 +277,49 @@ impl OwlApi {
         }
         self.save()?;
         Ok(format!("Added prefix {}=<{}>", prefix, uri))
+    }
+
+    pub fn set_ontology_iri(
+        &mut self,
+        iri: Option<&str>,
+        version_iri: Option<&str>,
+    ) -> Result<String, OwlApiError> {
+        if self.readonly {
+            return Err(OwlApiError::ReadOnly);
+        }
+
+        let old_ids: Vec<AnnotatedComponent<ArcStr>> = self
+            .ontology
+            .iter()
+            .filter(|ac| matches!(ac.component, Component::OntologyID(_)))
+            .cloned()
+            .collect();
+        for ac in &old_ids {
+            self.ontology.remove(ac);
+        }
+
+        let new_iri = iri.map(|s| self.build.iri(self.expand_curie(s)));
+        let new_viri = version_iri.map(|s| self.build.iri(self.expand_curie(s)));
+        let oid = OntologyID {
+            iri: new_iri,
+            viri: new_viri,
+        };
+        self.ontology
+            .insert(AnnotatedComponent::from(Component::OntologyID(oid)));
+        self.save()?;
+
+        let mut parts = Vec::new();
+        if let Some(i) = iri {
+            parts.push(format!("IRI set to <{}>", i));
+        }
+        if let Some(v) = version_iri {
+            parts.push(format!("version IRI set to <{}>", v));
+        }
+        if parts.is_empty() {
+            Ok("Ontology IRI cleared".to_string())
+        } else {
+            Ok(parts.join(", "))
+        }
     }
 
     pub fn get_labels_for_iri(&self, iri: &str, annotation_property: Option<&str>) -> Vec<String> {

@@ -640,6 +640,70 @@ impl LoadAndRegisterOntology {
     }
 }
 
+// ── Ontology IRI ───────────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "set_ontology_iri",
+    description = "Set or update the ontology IRI (and optional version IRI) for an OWL file. \
+    Pass iri=null to clear the ontology IRI."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct SetOntologyIri {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// The ontology IRI to set (e.g. 'http://example.org/my-ontology')
+    pub iri: Option<String>,
+    /// Optional version IRI (e.g. 'http://example.org/my-ontology/1.0')
+    pub version_iri: Option<String>,
+}
+
+impl SetOntologyIri {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .set_ontology_iri(params.iri.as_deref(), params.version_iri.as_deref())
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "set_ontology_iri_by_name",
+    description = "Set or update the ontology IRI (and optional version IRI) for a configured ontology \
+    referenced by its registered name."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct SetOntologyIriByName {
+    /// Name of a configured ontology
+    pub ontology_name: String,
+    /// The ontology IRI to set
+    pub iri: Option<String>,
+    /// Optional version IRI
+    pub version_iri: Option<String>,
+}
+
+impl SetOntologyIriByName {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load_by_name(&params.ontology_name)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .set_ontology_iri(params.iri.as_deref(), params.version_iri.as_deref())
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
 // ── Pitfall scanner ────────────────────────────────────────────────────────────
 
 #[mcp_tool(
@@ -723,11 +787,13 @@ tool_box!(
         AddPrefix,
         OntologyMetadata,
         GetLabelsForIri,
+        SetOntologyIri,
         AddAxiomByName,
         RemoveAxiomByName,
         FindAxiomsByName,
         AddPrefixByName,
         GetLabelsForIriByName,
+        SetOntologyIriByName,
         ListConfiguredOntologies,
         ConfigureOntology,
         RemoveOntologyConfig,

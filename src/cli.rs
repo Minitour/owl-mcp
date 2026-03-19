@@ -109,6 +109,19 @@ pub enum CliCommand {
         annotation_property: Option<String>,
     },
 
+    /// Set or update the ontology IRI (and optional version IRI)
+    SetOntologyIri {
+        /// Absolute path to the OWL file
+        #[arg(long)]
+        file: String,
+        /// The ontology IRI to set
+        #[arg(long)]
+        iri: Option<String>,
+        /// Optional version IRI
+        #[arg(long)]
+        version_iri: Option<String>,
+    },
+
     /// Add an axiom to a configured ontology by its registered name
     AddAxiomByName {
         /// Name of a configured ontology
@@ -172,6 +185,19 @@ pub enum CliCommand {
         /// IRI or CURIE of the annotation property (default: rdfs:label)
         #[arg(long)]
         annotation_property: Option<String>,
+    },
+
+    /// Set or update the ontology IRI for a configured ontology by name
+    SetOntologyIriByName {
+        /// Name of a configured ontology
+        #[arg(long)]
+        name: String,
+        /// The ontology IRI to set
+        #[arg(long)]
+        iri: Option<String>,
+        /// Optional version IRI
+        #[arg(long)]
+        version_iri: Option<String>,
     },
 
     /// List all ontologies registered in the configuration
@@ -391,6 +417,21 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             )
             .await
         }
+        CliCommand::SetOntologyIri {
+            file,
+            iri,
+            version_iri,
+        } => {
+            tools::SetOntologyIri::run_tool(
+                tools::SetOntologyIri {
+                    owl_file_path: file,
+                    iri,
+                    version_iri,
+                },
+                &manager,
+            )
+            .await
+        }
         CliCommand::AddAxiomByName { name, axiom } => {
             tools::AddAxiomByName::run_tool(
                 tools::AddAxiomByName {
@@ -451,6 +492,21 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                     ontology_name: name,
                     iri,
                     annotation_property,
+                },
+                &manager,
+            )
+            .await
+        }
+        CliCommand::SetOntologyIriByName {
+            name,
+            iri,
+            version_iri,
+        } => {
+            tools::SetOntologyIriByName::run_tool(
+                tools::SetOntologyIriByName {
+                    ontology_name: name,
+                    iri,
+                    version_iri,
                 },
                 &manager,
             )

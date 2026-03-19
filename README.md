@@ -12,7 +12,7 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 
 ## Features
 
-- **20 MCP tools** — add, remove, search, and inspect axioms; manage prefixes and labels; register and configure ontologies; scan for pitfalls
+- **22 MCP tools** — add, remove, search, and inspect axioms; manage prefixes, labels, and ontology IRI; register and configure ontologies; scan for pitfalls
 - **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
 - **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
 - **Persistent configuration** — register ontologies by name in `~/.owl-mcp/config.yaml`
@@ -141,6 +141,8 @@ owl-mcp serve --transport http --port 8080
 | `ontology_metadata` | Return ontology-level annotation axioms |
 | `get_labels_for_iri` | Look up `rdfs:label` (or custom property) values for an IRI |
 | `get_labels_for_iri_by_name` | Same, for a configured ontology |
+| `set_ontology_iri` | Set or update the ontology IRI and version IRI |
+| `set_ontology_iri_by_name` | Same, for a configured ontology |
 
 ### Configuration
 
