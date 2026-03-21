@@ -1,5 +1,4 @@
 mod cli;
-mod config;
 mod handler;
 mod ontology;
 mod pitfalls;
@@ -109,13 +108,7 @@ async fn main() {
 
     let args = Args::parse();
 
-    let manager = match OntologyManager::new() {
-        Ok(m) => Arc::new(Mutex::new(m)),
-        Err(e) => {
-            eprintln!("Failed to initialize OntologyManager: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let manager = Arc::new(Mutex::new(OntologyManager::new()));
 
     match args.command {
         Command::Serve {
