@@ -12,10 +12,9 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 
 ## Features
 
-- **22 MCP tools** — add, remove, search, and inspect axioms; manage prefixes, labels, and ontology IRI; register and configure ontologies; scan for pitfalls
+- **10 MCP tools** — add, remove, search, and inspect axioms; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls
 - **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
 - **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
-- **Persistent configuration** — register ontologies by name in `~/.owl-mcp/config.yaml`
 - **Live file watching** — automatically reloads ontology files modified externally
 - **OFN and RDF/XML support** — reads and writes both formats; format is auto-detected from file extension and content
 - **Never crashes** — errors are returned as MCP tool failures, not panics
@@ -71,8 +70,6 @@ owl-mcp add-axiom --file ontology.owl --axiom "SubClassOf(:Dog :Animal)"
 owl-mcp find-axioms --file ontology.owl --pattern "Dog" --limit 50
 owl-mcp get-all-axioms --file ontology.owl --include-labels
 owl-mcp test-pitfalls --file ontology.owl
-owl-mcp list-configured-ontologies
-owl-mcp find-axioms-by-name --name pizza --pattern "Topping"
 ```
 
 Run `owl-mcp --help` for a full list of commands, or `owl-mcp <command> --help` for details on a specific command.
@@ -114,7 +111,9 @@ owl-mcp serve --transport http --port 8080
 
 ## Tools
 
-### Axiom operations (by file path)
+All tools operate on OWL files by absolute path. The manager lazily loads files on first access and caches them for subsequent calls.
+
+### Axiom operations
 
 | Tool | Description |
 |---|---|
@@ -124,62 +123,22 @@ owl-mcp serve --transport http --port 8080
 | `find_axioms` | Search axioms with a regex pattern |
 | `get_all_axioms` | List all axioms (up to a limit) |
 
-### Axiom operations (by registered name)
-
-| Tool | Description |
-|---|---|
-| `add_axiom_by_name` | Add an axiom to a configured ontology |
-| `remove_axiom_by_name` | Remove an axiom from a configured ontology |
-| `find_axioms_by_name` | Search axioms in a configured ontology |
-
 ### Metadata and labels
 
 | Tool | Description |
 |---|---|
 | `add_prefix` | Add a prefix mapping (`ex:` → `http://example.org/`) |
-| `add_prefix_by_name` | Same, for a configured ontology |
 | `ontology_metadata` | Return ontology-level annotation axioms |
 | `get_labels_for_iri` | Look up `rdfs:label` (or custom property) values for an IRI |
-| `get_labels_for_iri_by_name` | Same, for a configured ontology |
 | `set_ontology_iri` | Set or update the ontology IRI and version IRI |
-| `set_ontology_iri_by_name` | Same, for a configured ontology |
-
-### Configuration
-
-| Tool | Description |
-|---|---|
-| `list_configured_ontologies` | List all registered ontologies |
-| `configure_ontology` | Add or update a named ontology entry |
-| `remove_ontology_config` | Remove a named ontology entry |
-| `get_ontology_config` | Retrieve configuration for a named ontology |
-| `register_ontology_in_config` | Register an existing file by name |
-| `load_and_register_ontology` | Load (or create) a file and register it |
 
 ### Quality checks
 
 | Tool | Description |
 |---|---|
-| `test_pitfalls` | Scan an ontology for common modeling pitfalls (31 checks) |
+| `test_pitfalls` | Scan for 31 common modeling pitfalls (inspired by OOPS!) |
 
-All `find_axioms` and `get_all_axioms` tools accept `include_labels: true` to annotate each axiom with human-readable labels appended as `## <IRI> # label` comments.
-
-## Configuration file
-
-Registered ontologies are stored at `~/.owl-mcp/config.yaml`:
-
-```yaml
-ontologies:
-  pizza:
-    name: pizza
-    path: /data/pizza.ofn
-    readonly: false
-    description: "Pizza ontology tutorial"
-    annotation_property: null
-    preferred_serialization: null
-    metadata_axioms: []
-```
-
-You can manage this file through the MCP tools or edit it directly — changes are picked up on the next tool call.
+`find_axioms` and `get_all_axioms` accept `include_labels: true` to annotate each axiom with human-readable labels appended as `## <IRI> # label` comments.
 
 ## Development
 
