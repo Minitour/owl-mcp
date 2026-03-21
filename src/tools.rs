@@ -303,6 +303,44 @@ impl SetOntologyIri {
     }
 }
 
+// ── Quality evaluation ─────────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "test_quality",
+    description = "Evaluate the quality of an OWL ontology using the OQuaRE framework (based on ISO/IEC 25000 SQuaRE). \
+    Uses the whelk OWL EL reasoner for inferred class hierarchy. \
+    Returns a JSON report with: basic metrics (class/property counts, hierarchy stats), \
+    19 raw + scaled metrics (ANOnto, AROnto, CBOOnto, CROnto, DITOnto, INROnto, LCOMOnto, \
+    NACOnto, NOCOnto, NOMOnto, RFCOnto, RROnto, TMOnto, WMCOnto, plus variants), \
+    22 subcharacteristics, 7 quality characteristics (Structural, Functional Adequacy, \
+    Maintainability, Operability, Reliability, Transferability, Compatibility), \
+    and an overall OQuaRE score (1-5 scale, where 1=not acceptable, 3=minimally acceptable, 5=exceeds requirements)."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct TestQuality {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+}
+
+impl TestQuality {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, false)
+            .map_err(CallToolError::new)?;
+
+        let report = crate::quality::evaluate(&api.ontology);
+        let json = serde_json::to_string_pretty(&report).map_err(|e| {
+            CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(e.to_string()))
+        })?;
+
+        text_result(json)
+    }
+}
+
 // ── Pitfall scanner ────────────────────────────────────────────────────────────
 
 #[mcp_tool(
@@ -372,6 +410,7 @@ tool_box!(
         OntologyMetadata,
         GetLabelsForIri,
         SetOntologyIri,
+        TestQuality,
         TestPitfalls,
     ]
 );

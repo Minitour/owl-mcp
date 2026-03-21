@@ -122,6 +122,13 @@ pub enum CliCommand {
         version_iri: Option<String>,
     },
 
+    /// Evaluate ontology quality using the OQuaRE framework
+    TestQuality {
+        /// Absolute path to the OWL file
+        #[arg(long)]
+        file: String,
+    },
+
     /// Scan an OWL ontology for common modeling pitfalls
     TestPitfalls {
         /// Absolute path to the OWL file
@@ -254,6 +261,15 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                     owl_file_path: file,
                     iri,
                     version_iri,
+                },
+                &manager,
+            )
+            .await
+        }
+        CliCommand::TestQuality { file } => {
+            tools::TestQuality::run_tool(
+                tools::TestQuality {
+                    owl_file_path: file,
                 },
                 &manager,
             )
