@@ -59,22 +59,6 @@ impl ServerHandler for OwlMcpHandler {
             OwlTools::OntologyMetadata(p) => OntologyMetadata::run_tool(p, mgr).await,
             OwlTools::GetLabelsForIri(p) => GetLabelsForIri::run_tool(p, mgr).await,
             OwlTools::SetOntologyIri(p) => SetOntologyIri::run_tool(p, mgr).await,
-            OwlTools::AddAxiomByName(p) => AddAxiomByName::run_tool(p, mgr).await,
-            OwlTools::RemoveAxiomByName(p) => RemoveAxiomByName::run_tool(p, mgr).await,
-            OwlTools::FindAxiomsByName(p) => FindAxiomsByName::run_tool(p, mgr).await,
-            OwlTools::AddPrefixByName(p) => AddPrefixByName::run_tool(p, mgr).await,
-            OwlTools::GetLabelsForIriByName(p) => GetLabelsForIriByName::run_tool(p, mgr).await,
-            OwlTools::SetOntologyIriByName(p) => SetOntologyIriByName::run_tool(p, mgr).await,
-            OwlTools::ListConfiguredOntologies(p) => {
-                ListConfiguredOntologies::run_tool(p, mgr).await
-            }
-            OwlTools::ConfigureOntology(p) => ConfigureOntology::run_tool(p, mgr).await,
-            OwlTools::RemoveOntologyConfig(p) => RemoveOntologyConfig::run_tool(p, mgr).await,
-            OwlTools::GetOntologyConfig(p) => GetOntologyConfig::run_tool(p, mgr).await,
-            OwlTools::RegisterOntologyInConfig(p) => {
-                RegisterOntologyInConfig::run_tool(p, mgr).await
-            }
-            OwlTools::LoadAndRegisterOntology(p) => LoadAndRegisterOntology::run_tool(p, mgr).await,
             OwlTools::TestPitfalls(p) => TestPitfalls::run_tool(p, mgr).await,
         }
     }
@@ -85,32 +69,17 @@ impl ServerHandler for OwlMcpHandler {
         _runtime: Arc<dyn McpServer>,
     ) -> Result<ListResourcesResult, RpcError> {
         Ok(ListResourcesResult {
-            resources: vec![
-                Resource {
-                    uri: "resource://config/ontologies".to_string(),
-                    name: "config/ontologies".to_string(),
-                    description: Some(
-                        "Full OWLMcpConfig with all configured ontologies".to_string(),
-                    ),
-                    mime_type: Some("application/json".to_string()),
-                    annotations: None,
-                    meta: None,
-                    size: None,
-                    title: None,
-                    icons: vec![],
-                },
-                Resource {
-                    uri: "resource://active".to_string(),
-                    name: "active".to_string(),
-                    description: Some("List of currently loaded ontology file paths".to_string()),
-                    mime_type: Some("application/json".to_string()),
-                    annotations: None,
-                    meta: None,
-                    size: None,
-                    title: None,
-                    icons: vec![],
-                },
-            ],
+            resources: vec![Resource {
+                uri: "resource://active".to_string(),
+                name: "active".to_string(),
+                description: Some("List of currently loaded ontology file paths".to_string()),
+                mime_type: Some("application/json".to_string()),
+                annotations: None,
+                meta: None,
+                size: None,
+                title: None,
+                icons: vec![],
+            }],
             meta: None,
             next_cursor: None,
         })
@@ -124,23 +93,14 @@ impl ServerHandler for OwlMcpHandler {
         let uri = &params.uri;
         let mgr = self.manager.lock().await;
 
-        let text =
-            if uri == "resource://config/ontologies" {
-                serde_json::to_string_pretty(&mgr.config)
-                    .unwrap_or_else(|e| format!("Error serializing config: {}", e))
-            } else if uri == "resource://active" {
-                serde_json::to_string_pretty(&mgr.active_paths())
-                    .unwrap_or_else(|e| format!("Error: {}", e))
-            } else if let Some(name) = uri.strip_prefix("resource://config/ontology/") {
-                match mgr.get_ontology_config(name) {
-                    Some(info) => serde_json::to_string_pretty(&info)
-                        .unwrap_or_else(|e| format!("Error: {}", e)),
-                    None => format!("No configured ontology named '{}'", name),
-                }
-            } else {
-                return Err(RpcError::invalid_params()
-                    .with_message(format!("Unknown resource URI: {}", uri)));
-            };
+        let text = if uri == "resource://active" {
+            serde_json::to_string_pretty(&mgr.active_paths())
+                .unwrap_or_else(|e| format!("Error: {}", e))
+        } else {
+            return Err(
+                RpcError::invalid_params().with_message(format!("Unknown resource URI: {}", uri))
+            );
+        };
 
         Ok(ReadResourceResult {
             contents: vec![ReadResourceContent::TextResourceContents(
