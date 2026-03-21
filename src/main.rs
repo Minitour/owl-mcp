@@ -2,6 +2,7 @@ mod cli;
 mod handler;
 mod ontology;
 mod pitfalls;
+mod quality;
 mod tools;
 
 use std::sync::Arc;

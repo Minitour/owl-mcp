@@ -59,6 +59,7 @@ impl ServerHandler for OwlMcpHandler {
             OwlTools::OntologyMetadata(p) => OntologyMetadata::run_tool(p, mgr).await,
             OwlTools::GetLabelsForIri(p) => GetLabelsForIri::run_tool(p, mgr).await,
             OwlTools::SetOntologyIri(p) => SetOntologyIri::run_tool(p, mgr).await,
+            OwlTools::TestQuality(p) => TestQuality::run_tool(p, mgr).await,
             OwlTools::TestPitfalls(p) => TestPitfalls::run_tool(p, mgr).await,
         }
     }

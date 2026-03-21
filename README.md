@@ -12,7 +12,7 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 
 ## Features
 
-- **10 MCP tools** — add, remove, search, and inspect axioms; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls
+- **11 MCP tools** — add, remove, search, and inspect axioms; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality
 - **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
 - **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
 - **Live file watching** — automatically reloads ontology files modified externally
@@ -70,6 +70,7 @@ owl-mcp add-axiom --file ontology.owl --axiom "SubClassOf(:Dog :Animal)"
 owl-mcp find-axioms --file ontology.owl --pattern "Dog" --limit 50
 owl-mcp get-all-axioms --file ontology.owl --include-labels
 owl-mcp test-pitfalls --file ontology.owl
+owl-mcp test-quality --file ontology.owl
 ```
 
 Run `owl-mcp --help` for a full list of commands, or `owl-mcp <command> --help` for details on a specific command.
@@ -137,8 +138,11 @@ All tools operate on OWL files by absolute path. The manager lazily loads files 
 | Tool | Description |
 |---|---|
 | `test_pitfalls` | Scan for 31 common modeling pitfalls (inspired by OOPS!) |
+| `test_quality` | Evaluate ontology quality using the OQuaRE framework (ISO/IEC 25000 SQuaRE) |
 
 `find_axioms` and `get_all_axioms` accept `include_labels: true` to annotate each axiom with human-readable labels appended as `## <IRI> # label` comments.
+
+`test_quality` uses the [whelk](https://github.com/INCATools/whelk-rs) OWL EL reasoner to compute inferred class hierarchy and returns a JSON report containing 19 raw and scaled metrics (ANOnto, AROnto, CBOOnto, CROnto, DITOnto, INROnto, LCOMOnto, NACOnto, NOCOnto, NOMOnto, RFCOnto, RROnto, TMOnto, WMCOnto, and variants), 22 subcharacteristics, 7 quality characteristics (Structural, Functional Adequacy, Maintainability, Operability, Reliability, Transferability, Compatibility), and an overall OQuaRE score on a 1–5 scale.
 
 ## Development
 
