@@ -341,6 +341,53 @@ impl TestQuality {
     }
 }
 
+// ── SPARQL query ───────────────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "sparql_query",
+    description = "Run a SPARQL query over one or more OWL files. Each file is serialized to RDF and \
+    loaded together into an in-memory store (pass several paths to merge a schema with its ABox or \
+    imports before querying), then the query is evaluated against the merged graph. \
+    Returns SPARQL 1.1 JSON results for SELECT/ASK, and a list of N-Triples for CONSTRUCT/DESCRIBE. \
+    Queries run over asserted triples (no reasoning is applied)."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct SparqlQuery {
+    /// Absolute paths to the OWL files to load and merge into one RDF graph before querying
+    pub owl_file_paths: Vec<String>,
+    /// The SPARQL query string (SELECT, ASK, CONSTRUCT, or DESCRIBE)
+    pub query: String,
+}
+
+impl SparqlQuery {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        if params.owl_file_paths.is_empty() {
+            return Err(CallToolError::new(
+                crate::ontology::owl_api::OwlApiError::Parse(
+                    "owl_file_paths must contain at least one path".to_string(),
+                ),
+            ));
+        }
+
+        let mut mgr = manager.lock().await;
+        let mut rdf_docs: Vec<Vec<u8>> = Vec::with_capacity(params.owl_file_paths.len());
+        for path in &params.owl_file_paths {
+            let api = mgr
+                .get_or_load(path, false, false)
+                .map_err(CallToolError::new)?;
+            let bytes = api.to_rdf_bytes().map_err(CallToolError::new)?;
+            rdf_docs.push(bytes);
+        }
+        drop(mgr);
+
+        let json = crate::sparql::query(&rdf_docs, &params.query).map_err(CallToolError::new)?;
+        text_result(json)
+    }
+}
+
 // ── Pitfall scanner ────────────────────────────────────────────────────────────
 
 #[mcp_tool(
@@ -412,5 +459,6 @@ tool_box!(
         SetOntologyIri,
         TestQuality,
         TestPitfalls,
+        SparqlQuery,
     ]
 );

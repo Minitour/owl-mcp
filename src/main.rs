@@ -3,6 +3,7 @@ mod handler;
 mod ontology;
 mod pitfalls;
 mod quality;
+mod sparql;
 mod tools;
 
 use std::sync::Arc;

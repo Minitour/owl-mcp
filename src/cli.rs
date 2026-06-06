@@ -138,6 +138,16 @@ pub enum CliCommand {
         #[arg(long)]
         pitfalls: Option<String>,
     },
+
+    /// Run a SPARQL query over one or more OWL files (merged into one RDF graph)
+    Sparql {
+        /// Absolute path to an OWL file. Repeat --file to merge several (e.g. schema + ABox).
+        #[arg(long = "file", required = true)]
+        files: Vec<String>,
+        /// SPARQL query string (SELECT, ASK, CONSTRUCT, or DESCRIBE)
+        #[arg(long)]
+        query: String,
+    },
 }
 
 fn print_result(result: CallToolResult) {
@@ -280,6 +290,16 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                 tools::TestPitfalls {
                     owl_file_path: file,
                     pitfalls,
+                },
+                &manager,
+            )
+            .await
+        }
+        CliCommand::Sparql { files, query } => {
+            tools::SparqlQuery::run_tool(
+                tools::SparqlQuery {
+                    owl_file_paths: files,
+                    query,
                 },
                 &manager,
             )
