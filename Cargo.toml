@@ -23,6 +23,7 @@ rust-mcp-sdk = { version = "0.8", default-features = false, features = [
 ] }
 horned-owl = "1.4"
 whelk = { git = "https://github.com/INCATools/whelk-rs" }
+oxigraph = { version = "0.5", default-features = false }
 curie = "0.1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

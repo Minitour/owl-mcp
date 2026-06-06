@@ -364,6 +364,18 @@ impl OwlApi {
         Ok(())
     }
 
+    /// Serialize the in-memory ontology to RDF/XML bytes.
+    ///
+    /// Used for SPARQL querying: the resulting triples are loaded into an
+    /// in-memory RDF store regardless of the on-disk file format.
+    pub fn to_rdf_bytes(&self) -> Result<Vec<u8>, OwlApiError> {
+        let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
+            self.ontology.clone().into();
+        let mut buf: Vec<u8> = Vec::new();
+        rdf_write(&mut buf, &cmo)?;
+        Ok(buf)
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn parse_axiom_string(
