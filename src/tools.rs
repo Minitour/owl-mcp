@@ -81,6 +81,163 @@ impl AddAxioms {
     }
 }
 
+// ── Structured assertions (escaping-free for long literals) ───────────────────
+
+#[mcp_tool(
+    name = "add_data_property_assertion",
+    description = "Add a data property assertion (DataPropertyAssertion) where the literal VALUE is \
+    supplied as a separate field. Use this instead of add_axiom for long or special-character \
+    values (containing ; = / , quotes or newlines): the server constructs the axiom directly, so \
+    no escaping or shell-quoting is needed. property/subject accept an IRI, CURIE, or <full-iri>."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddDataPropertyAssertion {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Data property IRI or CURIE, e.g. 'pf:metaprops' or '<http://example.org/metaprops>'
+    pub property: String,
+    /// Subject individual IRI or CURIE
+    pub subject: String,
+    /// The literal value, stored verbatim (no escaping required)
+    pub value: String,
+    /// Optional datatype IRI or CURIE (e.g. 'xsd:string'). Ignored if `lang` is set.
+    pub datatype: Option<String>,
+    /// Optional language tag (e.g. 'en'); produces a language-tagged literal.
+    pub lang: Option<String>,
+}
+
+impl AddDataPropertyAssertion {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_data_property_assertion(
+                &params.property,
+                &params.subject,
+                &params.value,
+                params.datatype.as_deref(),
+                params.lang.as_deref(),
+            )
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "add_annotation_assertion",
+    description = "Add an annotation assertion (AnnotationAssertion) where the literal VALUE is \
+    supplied as a separate field. Use this instead of add_axiom for long or special-character \
+    values (containing ; = / , quotes or newlines): the server constructs the axiom directly, so \
+    no escaping or shell-quoting is needed. property/subject accept an IRI, CURIE, or <full-iri>."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddAnnotationAssertion {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Annotation property IRI or CURIE, e.g. 'rdfs:label'
+    pub property: String,
+    /// Subject IRI or CURIE the annotation applies to
+    pub subject: String,
+    /// The literal value, stored verbatim (no escaping required)
+    pub value: String,
+    /// Optional datatype IRI or CURIE (e.g. 'xsd:string'). Ignored if `lang` is set.
+    pub datatype: Option<String>,
+    /// Optional language tag (e.g. 'en'); produces a language-tagged literal.
+    pub lang: Option<String>,
+}
+
+impl AddAnnotationAssertion {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_annotation_assertion(
+                &params.property,
+                &params.subject,
+                &params.value,
+                params.datatype.as_deref(),
+                params.lang.as_deref(),
+            )
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "add_object_property_assertion",
+    description = "Add an object property assertion (ObjectPropertyAssertion) linking a subject \
+    individual to a target individual via an object property. property/subject/target accept an \
+    IRI, CURIE, or <full-iri>."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddObjectPropertyAssertion {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Object property IRI or CURIE
+    pub property: String,
+    /// Subject individual IRI or CURIE (the `from` individual)
+    pub subject: String,
+    /// Target individual IRI or CURIE (the `to` individual)
+    pub target: String,
+}
+
+impl AddObjectPropertyAssertion {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_object_property_assertion(&params.property, &params.subject, &params.target)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
+#[mcp_tool(
+    name = "add_class_assertion",
+    description = "Add a class assertion (ClassAssertion) stating that an individual is an instance \
+    of a class. class/individual accept an IRI, CURIE, or <full-iri>."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct AddClassAssertion {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Class IRI or CURIE
+    pub class: String,
+    /// Individual IRI or CURIE
+    pub individual: String,
+}
+
+impl AddClassAssertion {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut mgr = manager.lock().await;
+        let api = mgr
+            .get_or_load(&params.owl_file_path, false, true)
+            .map_err(CallToolError::new)?;
+        let msg = api
+            .add_class_assertion(&params.class, &params.individual)
+            .map_err(CallToolError::new)?;
+        text_result(msg)
+    }
+}
+
 #[mcp_tool(
     name = "remove_axiom",
     description = "Remove a single OWL axiom (given in functional syntax) from the ontology file."
@@ -450,6 +607,10 @@ tool_box!(
     [
         AddAxiom,
         AddAxioms,
+        AddDataPropertyAssertion,
+        AddAnnotationAssertion,
+        AddObjectPropertyAssertion,
+        AddClassAssertion,
         RemoveAxiom,
         FindAxioms,
         GetAllAxioms,

@@ -1,6 +1,6 @@
 [package]
 name = "owl-mcp"
-version = "1.0.0"
+version = "1.0.11"
 edition = "2021"
 description = "High-performance MCP server for OWL ontology management, written in Rust"
 authors = ["Antonio Zaitoun <antonio@zaitoun.dev>"]

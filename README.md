@@ -12,7 +12,7 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 
 ## Features
 
-- **12 MCP tools** — add, remove, search, and inspect axioms; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality; run SPARQL queries
+- **16 MCP tools** — add, remove, search, and inspect axioms; add structured assertions (data/annotation/object property, class) with the literal value as a separate field; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality; run SPARQL queries
 - **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
 - **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
 - **Live file watching** — automatically reloads ontology files modified externally
@@ -67,6 +67,8 @@ Every MCP tool is available as a subcommand:
 
 ```bash
 owl-mcp add-axiom --file ontology.owl --axiom "SubClassOf(:Dog :Animal)"
+owl-mcp add-data-property-assertion --file ontology.owl --property :metaprops --subject :Plan1 --value-file ./long-value.txt
+owl-mcp add-axioms --file ontology.owl --axioms-file ./axioms.json
 owl-mcp find-axioms --file ontology.owl --pattern "Dog" --limit 50
 owl-mcp get-all-axioms --file ontology.owl --include-labels
 owl-mcp test-pitfalls --file ontology.owl
@@ -122,9 +124,15 @@ All tools operate on OWL files by absolute path. The manager lazily loads files 
 |---|---|
 | `add_axiom` | Add a single axiom in OWL Functional Syntax |
 | `add_axioms` | Add multiple axioms in one call |
+| `add_data_property_assertion` | Assert a data property value (value passed as a separate field — no escaping) |
+| `add_annotation_assertion` | Assert an annotation value (value passed as a separate field — no escaping) |
+| `add_object_property_assertion` | Link two individuals via an object property |
+| `add_class_assertion` | Assert that an individual is an instance of a class |
 | `remove_axiom` | Remove an axiom |
 | `find_axioms` | Search axioms with a regex pattern |
 | `get_all_axioms` | List all axioms (up to a limit) |
+
+For long or special-character literal values (containing `;`, `=`, `/`, `,`, quotes, or newlines), prefer the structured assertion tools over hand-writing a quoted `add_axiom` string: they take the `value` as a separate field and build the axiom server-side, so no escaping is needed. In CLI mode, `add-axioms` also accepts `--axioms-file <path>` (a JSON array of strings, or NUL/newline-delimited; `-` for stdin), and the structured commands accept `--value-file <path>`, both of which bypass shell quoting entirely. `add_axiom`/`add_axioms` now return a hard error (instead of a silent warning) when an input parses to no axiom.
 
 ### Metadata and labels
 

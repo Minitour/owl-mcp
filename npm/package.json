@@ -1,6 +1,6 @@
 {
   "name": "owl-mcp",
-  "version": "1.0.0",
+  "version": "1.0.11",
   "description": "High-performance MCP server for OWL ontology management, written in Rust",
   "homepage": "https://github.com/Minitour/owl-mcp",
   "repository": {
@@ -27,11 +27,11 @@
     "postinstall": "node ./bin/install.js"
   },
   "optionalDependencies": {
-    "@owl-mcp/owl-mcp-linux-x64": "1.0.0",
-    "@owl-mcp/owl-mcp-linux-arm64": "1.0.0",
-    "@owl-mcp/owl-mcp-darwin-x64": "1.0.0",
-    "@owl-mcp/owl-mcp-darwin-arm64": "1.0.0",
-    "@owl-mcp/owl-mcp-win32-x64": "1.0.0"
+    "@owl-mcp/owl-mcp-linux-x64": "1.0.11",
+    "@owl-mcp/owl-mcp-linux-arm64": "1.0.11",
+    "@owl-mcp/owl-mcp-darwin-x64": "1.0.11",
+    "@owl-mcp/owl-mcp-darwin-arm64": "1.0.11",
+    "@owl-mcp/owl-mcp-win32-x64": "1.0.11"
   },
   "engines": {
     "node": ">=18"
