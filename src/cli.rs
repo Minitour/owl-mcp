@@ -600,14 +600,20 @@ mod tests {
     fn parse_axiom_list_newline_delimited() {
         let content = "Declaration(Class(<a>))\n\nDeclaration(Class(<b>))\n";
         let v = parse_axiom_list(content);
-        assert_eq!(v, vec!["Declaration(Class(<a>))", "Declaration(Class(<b>))"]);
+        assert_eq!(
+            v,
+            vec!["Declaration(Class(<a>))", "Declaration(Class(<b>))"]
+        );
     }
 
     #[test]
     fn parse_axiom_list_nul_delimited() {
         let content = "Declaration(Class(<a>))\0Declaration(Class(<b>))";
         let v = parse_axiom_list(content);
-        assert_eq!(v, vec!["Declaration(Class(<a>))", "Declaration(Class(<b>))"]);
+        assert_eq!(
+            v,
+            vec!["Declaration(Class(<a>))", "Declaration(Class(<b>))"]
+        );
     }
 
     #[test]

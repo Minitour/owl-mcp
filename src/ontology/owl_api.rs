@@ -10,8 +10,8 @@ use horned_owl::io::rdf::reader::read_with_build as rdf_read;
 use horned_owl::io::rdf::writer::write as rdf_write;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{
-    AnnotatedComponent, Annotation, AnnotationAssertion, AnnotationSubject, AnnotationValue, ArcStr,
-    Build, ClassAssertion, Component, DataPropertyAssertion, Literal, MutableOntology,
+    AnnotatedComponent, Annotation, AnnotationAssertion, AnnotationSubject, AnnotationValue,
+    ArcStr, Build, ClassAssertion, Component, DataPropertyAssertion, Literal, MutableOntology,
     ObjectPropertyAssertion, OntologyID,
 };
 use horned_owl::ontology::component_mapped::ComponentMappedOntology;
