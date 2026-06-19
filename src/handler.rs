@@ -52,6 +52,14 @@ impl ServerHandler for OwlMcpHandler {
         match tool {
             OwlTools::AddAxiom(p) => AddAxiom::run_tool(p, mgr).await,
             OwlTools::AddAxioms(p) => AddAxioms::run_tool(p, mgr).await,
+            OwlTools::AddDataPropertyAssertion(p) => {
+                AddDataPropertyAssertion::run_tool(p, mgr).await
+            }
+            OwlTools::AddAnnotationAssertion(p) => AddAnnotationAssertion::run_tool(p, mgr).await,
+            OwlTools::AddObjectPropertyAssertion(p) => {
+                AddObjectPropertyAssertion::run_tool(p, mgr).await
+            }
+            OwlTools::AddClassAssertion(p) => AddClassAssertion::run_tool(p, mgr).await,
             OwlTools::RemoveAxiom(p) => RemoveAxiom::run_tool(p, mgr).await,
             OwlTools::FindAxioms(p) => FindAxioms::run_tool(p, mgr).await,
             OwlTools::GetAllAxioms(p) => GetAllAxioms::run_tool(p, mgr).await,

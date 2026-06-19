@@ -10,8 +10,9 @@ use horned_owl::io::rdf::reader::read_with_build as rdf_read;
 use horned_owl::io::rdf::writer::write as rdf_write;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{
-    AnnotatedComponent, AnnotationAssertion, AnnotationSubject, AnnotationValue, ArcStr, Build,
-    Component, Literal, MutableOntology, OntologyID,
+    AnnotatedComponent, Annotation, AnnotationAssertion, AnnotationSubject, AnnotationValue,
+    ArcStr, Build, ClassAssertion, Component, DataPropertyAssertion, Literal, MutableOntology,
+    ObjectPropertyAssertion, OntologyID,
 };
 use horned_owl::ontology::component_mapped::ComponentMappedOntology;
 use horned_owl::ontology::set::SetOntology;
@@ -141,7 +142,7 @@ impl OwlApi {
         }
         let components = self.parse_axiom_string(axiom_str)?;
         if components.is_empty() {
-            return Ok(format!("Warning: no axiom parsed from: {}", axiom_str));
+            return Err(empty_parse_error(axiom_str));
         }
         let count = components.len();
         for ac in components {
@@ -158,6 +159,9 @@ impl OwlApi {
         let mut parsed = Vec::new();
         for axiom_str in axiom_strs {
             let components = self.parse_axiom_string(axiom_str)?;
+            if components.is_empty() {
+                return Err(empty_parse_error(axiom_str));
+            }
             parsed.extend(components);
         }
         let count = parsed.len();
@@ -187,6 +191,126 @@ impl OwlApi {
         }
         self.save()?;
         Ok(format!("Successfully removed {} axiom(s)", removed))
+    }
+
+    // ── Structured assertions ─────────────────────────────────────────────────
+    //
+    // These build the axiom from its component parts (property, subject, value)
+    // and construct the OWL model object directly. The literal value is stored
+    // verbatim and never passes through the functional-syntax parser, so callers
+    // can supply arbitrarily long values containing `;`, `=`, `/`, `,`, quotes,
+    // or newlines without any escaping or shell-quoting concerns.
+
+    /// Build an OWL literal from a raw value plus an optional datatype or
+    /// language tag. A language tag (if non-empty) takes precedence over a
+    /// datatype; with neither, a plain `xsd:string` literal is produced.
+    fn build_literal(
+        &self,
+        value: &str,
+        datatype: Option<&str>,
+        lang: Option<&str>,
+    ) -> Literal<ArcStr> {
+        if let Some(lang) = lang.filter(|l| !l.is_empty()) {
+            Literal::Language {
+                literal: value.to_string(),
+                lang: lang.to_string(),
+            }
+        } else if let Some(dt) = datatype.filter(|d| !d.is_empty()) {
+            Literal::Datatype {
+                literal: value.to_string(),
+                datatype_iri: self.build.iri(self.expand_curie(dt)),
+            }
+        } else {
+            Literal::Simple {
+                literal: value.to_string(),
+            }
+        }
+    }
+
+    fn insert_component_and_save(
+        &mut self,
+        component: Component<ArcStr>,
+    ) -> Result<String, OwlApiError> {
+        if self.readonly {
+            return Err(OwlApiError::ReadOnly);
+        }
+        let ac = AnnotatedComponent::from(component);
+        let rendered = self.component_to_string(&ac);
+        self.ontology.insert(ac);
+        self.save()?;
+        Ok(format!("Successfully added: {}", rendered))
+    }
+
+    /// Add a `DataPropertyAssertion(property subject "value"^^datatype)`.
+    pub fn add_data_property_assertion(
+        &mut self,
+        property: &str,
+        subject: &str,
+        value: &str,
+        datatype: Option<&str>,
+        lang: Option<&str>,
+    ) -> Result<String, OwlApiError> {
+        let dp = self.build.data_property(self.expand_curie(property));
+        let from = self.build.named_individual(self.expand_curie(subject));
+        let to = self.build_literal(value, datatype, lang);
+        let axiom = DataPropertyAssertion {
+            dp,
+            from: from.into(),
+            to,
+        };
+        self.insert_component_and_save(Component::DataPropertyAssertion(axiom))
+    }
+
+    /// Add an `AnnotationAssertion(property subject "value")`.
+    pub fn add_annotation_assertion(
+        &mut self,
+        property: &str,
+        subject: &str,
+        value: &str,
+        datatype: Option<&str>,
+        lang: Option<&str>,
+    ) -> Result<String, OwlApiError> {
+        let ap = self.build.annotation_property(self.expand_curie(property));
+        let subject_iri = self.build.iri(self.expand_curie(subject));
+        let av = AnnotationValue::Literal(self.build_literal(value, datatype, lang));
+        let axiom = AnnotationAssertion {
+            subject: AnnotationSubject::IRI(subject_iri),
+            ann: Annotation { ap, av },
+        };
+        self.insert_component_and_save(Component::AnnotationAssertion(axiom))
+    }
+
+    /// Add an `ObjectPropertyAssertion(property subject target)`.
+    pub fn add_object_property_assertion(
+        &mut self,
+        property: &str,
+        subject: &str,
+        target: &str,
+    ) -> Result<String, OwlApiError> {
+        let ope = self.build.object_property(self.expand_curie(property));
+        let from = self.build.named_individual(self.expand_curie(subject));
+        let to = self.build.named_individual(self.expand_curie(target));
+        let axiom = ObjectPropertyAssertion {
+            ope: ope.into(),
+            from: from.into(),
+            to: to.into(),
+        };
+        self.insert_component_and_save(Component::ObjectPropertyAssertion(axiom))
+    }
+
+    /// Add a `ClassAssertion(class individual)`.
+    pub fn add_class_assertion(
+        &mut self,
+        class: &str,
+        individual: &str,
+    ) -> Result<String, OwlApiError> {
+        let ce = self.build.class(self.expand_curie(class));
+        let i = self.build.named_individual(self.expand_curie(individual));
+        let axiom = ClassAssertion {
+            ce: ce.into(),
+            i: i.into(),
+        };
+        self.insert_component_and_save(Component::ClassAssertion(axiom))
     }
 
     pub fn find_axioms(
@@ -477,12 +601,42 @@ impl OwlApi {
         if curie.starts_with('<') && curie.ends_with('>') {
             return curie[1..curie.len() - 1].to_string();
         }
-        // Try curie::PrefixMapping expansion
+        // Try curie::PrefixMapping expansion, then fall back to well-known
+        // prefixes (rdf/rdfs/owl/xsd) so callers can use e.g. `rdfs:label`
+        // even when the ontology has not declared that prefix explicitly.
         match self.prefixes.expand_curie_string(curie) {
             Ok(expanded) => expanded,
-            Err(_) => curie.to_string(),
+            Err(_) => expand_wellknown_prefix(curie).unwrap_or_else(|| curie.to_string()),
         }
     }
+}
+
+/// Expand a CURIE using the standard W3C prefixes (rdf, rdfs, owl, xsd).
+/// Returns `None` for anything that is not one of these well-known prefixes.
+fn expand_wellknown_prefix(curie: &str) -> Option<String> {
+    let (prefix, local) = curie.split_once(':')?;
+    let base = match prefix {
+        "rdf" => "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+        "rdfs" => "http://www.w3.org/2000/01/rdf-schema#",
+        "owl" => "http://www.w3.org/2002/07/owl#",
+        "xsd" => "http://www.w3.org/2001/XMLSchema#",
+        _ => return None,
+    };
+    Some(format!("{}{}", base, local))
+}
+
+/// Build a precise error for the case where an axiom string parsed without
+/// yielding any component — almost always a malformed literal or bad syntax.
+fn empty_parse_error(axiom_str: &str) -> OwlApiError {
+    OwlApiError::Parse(format!(
+        "No axiom was parsed from input. This usually means the axiom is malformed \
+         (unterminated string literal, unbalanced parentheses, or an unescaped quote \
+         inside a literal). For long or special-character literal values, prefer the \
+         structured assertion tools (e.g. add_data_property_assertion / \
+         add_annotation_assertion), which take the value as a separate field and require \
+         no escaping. Offending input: {}",
+        axiom_str
+    ))
 }
 
 fn parse_bytes(
@@ -947,6 +1101,192 @@ Ontology(
         let mut api = OwlApi::load(f.path(), true, false).unwrap();
         let result = api.set_ontology_iri(Some("http://example.org/x"), None);
         assert!(matches!(result, Err(OwlApiError::ReadOnly)));
+    }
+
+    // ── structured assertions + long-literal robustness ───────────────────────
+
+    /// A ~2 KB literal exercising `;`, `=`, `/`, `,`, embedded quotes and newlines —
+    /// the exact shape that breaks hand-written functional-syntax literals.
+    fn big_literal() -> String {
+        let mut s = String::new();
+        for i in 0..50 {
+            s.push_str(&format!(
+                "source=s{i}; instrument=i{i}, path=/seg/{i}/leaf; expr=x=\"y{i}\"; note=a,b,c\n"
+            ));
+        }
+        assert!(s.len() > 2000, "expected >2KB literal, got {}", s.len());
+        s
+    }
+
+    fn data_property_values(api: &OwlApi, property: &str) -> Vec<String> {
+        api.ontology
+            .iter()
+            .filter_map(|ac| {
+                if let Component::DataPropertyAssertion(dpa) = &ac.component {
+                    let p: &str = dpa.dp.0.as_ref();
+                    if p == property {
+                        return Some(dpa.to.literal().clone());
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    #[test]
+    fn add_data_property_assertion_long_literal_roundtrip() {
+        let f = empty_ofn();
+        let value = big_literal();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            let msg = api
+                .add_data_property_assertion(
+                    "<http://example.org/metaprops>",
+                    "<http://example.org/Subj>",
+                    &value,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(msg.contains("Successfully"));
+        }
+        // Reload fresh from disk: the value must survive serialization byte-for-byte.
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let values = data_property_values(&api2, "http://example.org/metaprops");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0], value);
+    }
+
+    #[test]
+    fn add_annotation_assertion_long_literal_roundtrip() {
+        let f = empty_ofn();
+        let value = big_literal();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            api.add_annotation_assertion(
+                "<http://example.org/metaprops>",
+                "<http://example.org/Subj>",
+                &value,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let labels = api2.get_labels_for_iri(
+            "http://example.org/Subj",
+            Some("<http://example.org/metaprops>"),
+        );
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0], value);
+    }
+
+    #[test]
+    fn add_data_property_assertion_with_datatype() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        api.add_data_property_assertion(
+            "<http://example.org/age>",
+            "<http://example.org/Subj>",
+            "42",
+            Some("xsd:integer"),
+            None,
+        )
+        .unwrap();
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let values = data_property_values(&api2, "http://example.org/age");
+        assert_eq!(values, vec!["42"]);
+    }
+
+    #[test]
+    fn add_annotation_assertion_with_lang() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        api.add_annotation_assertion(
+            "rdfs:label",
+            "<http://example.org/Subj>",
+            "chien",
+            None,
+            Some("fr"),
+        )
+        .unwrap();
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let labels = api2.get_labels_for_iri("http://example.org/Subj", None);
+        assert_eq!(labels, vec!["chien@fr"]);
+    }
+
+    #[test]
+    fn add_object_property_assertion_persists() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        api.add_object_property_assertion(
+            "<http://example.org/knows>",
+            "<http://example.org/Alice>",
+            "<http://example.org/Bob>",
+        )
+        .unwrap();
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let axioms = api2.get_all_axioms(100, false, None);
+        assert!(axioms.iter().any(|s| s.contains("ObjectPropertyAssertion")));
+    }
+
+    #[test]
+    fn add_class_assertion_persists() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        api.add_class_assertion("<http://example.org/Dog>", "<http://example.org/Rex>")
+            .unwrap();
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let axioms = api2.get_all_axioms(100, false, None);
+        assert!(axioms.iter().any(|s| s.contains("ClassAssertion")));
+    }
+
+    #[test]
+    fn structured_assertion_readonly_returns_error() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), true, false).unwrap();
+        let result = api.add_data_property_assertion(
+            "<http://example.org/p>",
+            "<http://example.org/s>",
+            "v",
+            None,
+            None,
+        );
+        assert!(matches!(result, Err(OwlApiError::ReadOnly)));
+    }
+
+    // ── hard errors on zero-parse ──────────────────────────────────────────────
+
+    #[test]
+    fn add_axiom_empty_input_is_hard_error() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        let result = api.add_axiom("   ");
+        assert!(matches!(result, Err(OwlApiError::Parse(_))));
+    }
+
+    #[test]
+    fn add_axioms_zero_parse_is_hard_error() {
+        let f = empty_ofn();
+        let mut api = OwlApi::load(f.path(), false, false).unwrap();
+        let strs = vec![
+            "Declaration(Class(<http://example.org/A>))".to_string(),
+            "   ".to_string(),
+        ];
+        let result = api.add_axioms(&strs);
+        assert!(matches!(result, Err(OwlApiError::Parse(_))));
+    }
+
+    // ── well-known prefix expansion ────────────────────────────────────────────
+
+    #[test]
+    fn expand_curie_wellknown_rdfs() {
+        let f = empty_ofn();
+        let api = OwlApi::load(f.path(), false, false).unwrap();
+        assert_eq!(
+            api.expand_curie("rdfs:label"),
+            "http://www.w3.org/2000/01/rdf-schema#label"
+        );
     }
 
     // ── expand_curie ─────────────────────────────────────────────────────────
