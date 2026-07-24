@@ -86,10 +86,16 @@ fn write_ontology_with_format(
         ontology.clone().into();
     match format {
         OntologyFormat::Ofn => {
-            let buf = ofn_write(Vec::new(), &cmo, Some(prefixes))?;
+            // Drop the default (empty-name) prefix before writing: horned
+            // abbreviates default-namespace IRIs to bare local names
+            // (`Class(Thing)`) and the ontology IRI to `:`, neither of which its
+            // own reader accepts. Without a default prefix those IRIs serialize
+            // as full `<iri>` and round-trip; named prefixes still compress.
+            let write_prefixes = prefixes_without_default(prefixes);
+            let buf = ofn_write(Vec::new(), &cmo, Some(&write_prefixes))?;
             let text = String::from_utf8(buf)
                 .map_err(|e| OwlApiError::Parse(format!("OFN output not valid UTF-8: {e}")))?;
-            let fixed = expand_header_curies(&text, prefixes);
+            let fixed = expand_header_curies(&text, &write_prefixes);
             std::fs::write(path, fixed)?;
         }
         OntologyFormat::Rdf => {
@@ -670,10 +676,55 @@ pub fn ontology_to_rdf_bytes(ontology: &SetOntology<ArcStr>) -> Result<Vec<u8>, 
 ///
 /// CURIEs with a local part (`crf:Fatigue`, `crf:2.0`, `obo:bfo.owl`) re-parse
 /// fine and are left untouched, keeping axiom bodies readable. Only *known*
-/// prefixes are expanded, and step 3 skips the prefix declaration `crf:=<…>`
-/// (its `:` is followed by `=`), so a `word:` sequence inside a literal with an
-/// undeclared prefix is preserved.
+/// prefixes are expanded, and the prefix declaration `crf:=<…>` is skipped (its
+/// `:` is followed by `=`).
+///
+/// The rewrites are applied only to text **outside** quoted string literals
+/// (escaped quotes respected), so a literal value that happens to contain a
+/// `prefix:` sequence is preserved byte-for-byte.
 fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
+    let mut out = String::with_capacity(ofn.len());
+    let mut buf = String::new();
+    let mut in_literal = false;
+    let mut escaped = false;
+
+    for ch in ofn.chars() {
+        if in_literal {
+            buf.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                // End of literal: copy verbatim, never rewritten.
+                out.push_str(&buf);
+                buf.clear();
+                in_literal = false;
+            }
+        } else if ch == '"' {
+            // Flush the preceding non-literal run (with rewrites), then start
+            // buffering the literal.
+            out.push_str(&rewrite_ofn_curies(&buf, prefixes));
+            buf.clear();
+            buf.push(ch);
+            in_literal = true;
+        } else {
+            buf.push(ch);
+        }
+    }
+
+    if in_literal {
+        // Unterminated literal (shouldn't happen) — emit verbatim.
+        out.push_str(&buf);
+    } else {
+        out.push_str(&rewrite_ofn_curies(&buf, prefixes));
+    }
+    out
+}
+
+/// Apply the CURIE rewrites to a run of OFN text that is guaranteed to contain
+/// no string literals (see [`expand_header_curies`]).
+fn rewrite_ofn_curies(segment: &str, prefixes: &PrefixMapping) -> String {
     // A CURIE token: a prefix name, a colon, then an optional local part
     // (empty local — e.g. `crf:` — is exactly the unparseable case we fix).
     // Excludes `(`, `<`, `>` so it never swallows an axiom keyword or an
@@ -683,7 +734,7 @@ fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
     // 1. Expand `Import(curie)` → `Import(<iri>)` wherever it appears (horned
     //    may inline imports on the `Ontology(` line for small ontologies).
     let import_re = Regex::new(&format!(r"Import\(\s*({CURIE})\s*\)")).unwrap();
-    let step1 = import_re.replace_all(ofn, |caps: &regex::Captures| {
+    let step1 = import_re.replace_all(segment, |caps: &regex::Captures| {
         match expand_iri_token(&caps[1], prefixes) {
             Some(full) => format!("Import({full})"),
             None => caps[0].to_string(),
@@ -711,7 +762,8 @@ fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
     //    and re-emitted. The `regex` crate has no look-around, so we consume and
     //    restore it. `crf:=` (prefix decl) is not matched because `=` is not a
     //    delimiter here; `crf:Fatigue` / `crf:2.0` are not matched because a
-    //    local-name char follows the colon.
+    //    local-name char follows the colon. (The default prefix is dropped
+    //    before writing, so a lone `:` never appears here.)
     let empty_re = Regex::new(r"([A-Za-z][A-Za-z0-9_.\-]*):([\s(),])").unwrap();
     let step3 = empty_re.replace_all(&step2, |caps: &regex::Captures| {
         match prefix_namespace(prefixes, &caps[1]) {
@@ -721,6 +773,17 @@ fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
     });
 
     step3.into_owned()
+}
+
+/// Clone a prefix map without its default (empty-name) prefix.
+fn prefixes_without_default(prefixes: &PrefixMapping) -> PrefixMapping {
+    let mut pm = PrefixMapping::default();
+    for (name, ns) in prefixes.mappings() {
+        if !name.is_empty() {
+            let _ = pm.add_prefix(name, ns);
+        }
+    }
+    pm
 }
 
 /// Expand a single CURIE token (`prefix:local`, including empty local like
@@ -1319,6 +1382,62 @@ Ontology(
         assert!(
             axioms.iter().any(|s| s.contains("CRF Ontology")),
             "ontology annotation must survive reload: {axioms:?}"
+        );
+    }
+
+    #[test]
+    fn literal_containing_curie_like_text_is_preserved() {
+        // A literal value that contains `crf: ` (with `crf` declared as a prefix)
+        // must NOT be rewritten — only IRI/CURIE tokens outside literals are.
+        let f = empty_ofn();
+        let value = "refer to crf: and owl: sections, and rdfs: too";
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            api.add_prefix("crf:", "http://example.org/crf/").unwrap();
+            api.add_annotation_assertion(
+                "rdfs:comment",
+                "<http://example.org/crf/Thing>",
+                value,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        // The literal survives byte-for-byte across save + fresh reload.
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let labels = api2.get_labels_for_iri("http://example.org/crf/Thing", Some("rdfs:comment"));
+        assert_eq!(labels, vec![value.to_string()]);
+    }
+
+    #[test]
+    fn default_prefix_ontology_iri_roundtrips() {
+        // Default prefix namespace == ontology IRI ⇒ horned emits `:` (empty
+        // prefix + empty local); step 3 must expand it to a full IRI.
+        let f = empty_ofn();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            api.add_prefix("", "http://example.org/def/").unwrap();
+            api.set_ontology_iri(Some("http://example.org/def/"), None)
+                .unwrap();
+            api.add_axiom("Declaration(Class(<http://example.org/def/Thing>))")
+                .unwrap();
+        }
+        let content = std::fs::read_to_string(f.path()).unwrap();
+        assert!(
+            !content.contains("Ontology(: ") && !content.contains("Ontology(:\n"),
+            "header should not be an empty default-prefix CURIE: {content}"
+        );
+        assert!(
+            content.contains("<http://example.org/def/Thing>"),
+            "default-namespace IRI should be written in full: {content}"
+        );
+
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        assert!(
+            api2.get_all_axioms(100, false, None)
+                .iter()
+                .any(|s| s.contains("Thing")),
+            "axioms must survive reload with a default prefix"
         );
     }
 
