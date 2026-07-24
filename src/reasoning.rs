@@ -120,28 +120,102 @@ pub fn inferred_subclass_pairs(
     pairs
 }
 
-/// Run the reasoner and return a copy of `ontology` with inferred named `SubClassOf` axioms added.
+/// Collect asserted named `ClassAssertion` pairs `(class_iri, individual_iri)`.
+fn asserted_class_assertions(ontology: &SetOntology<ArcStr>) -> HashSet<(String, String)> {
+    let mut pairs = HashSet::new();
+    for ac in ontology.iter() {
+        if let Component::ClassAssertion(ClassAssertion { ce, i }) = &ac.component {
+            if let (
+                ClassExpression::Class(Class(class_iri)),
+                Individual::Named(NamedIndividual(ind_iri)),
+            ) = (ce, i)
+            {
+                pairs.insert((class_iri.as_ref().to_string(), ind_iri.as_ref().to_string()));
+            }
+        }
+    }
+    pairs
+}
+
+/// Inferred named `ClassAssertion` pairs `(class_iri, individual_iri)` that are
+/// not already asserted.
+///
+/// Propagates each asserted `ClassAssertion(C i)` up the (asserted + inferred)
+/// named subsumption closure: if `i` is a `C` and `C ⊑ D`, then `i` is a `D`.
+/// This lets `?i a :D` SPARQL queries resolve inferred instance types without
+/// requiring the caller to write `rdfs:subClassOf*` property paths. `owl:Thing`
+/// and `owl:Nothing` are excluded as inferred types.
+pub fn inferred_class_assertion_pairs(
+    ontology: &SetOntology<ArcStr>,
+    state: &ReasonerState,
+) -> Vec<(String, String)> {
+    let asserted = asserted_class_assertions(ontology);
+    if asserted.is_empty() {
+        return Vec::new();
+    }
+
+    // Ancestor map over named classes from the subsumption closure.
+    let mut ancestors: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (sub, sup) in state.named_subsumptions() {
+        if sub == sup || sup == OWL_THING || sup == OWL_NOTHING {
+            continue;
+        }
+        ancestors
+            .entry(sub.to_string())
+            .or_default()
+            .push(sup.to_string());
+    }
+
+    let mut out = Vec::new();
+    for (class, individual) in &asserted {
+        if let Some(sups) = ancestors.get(class) {
+            for sup in sups {
+                let key = (sup.clone(), individual.clone());
+                if !asserted.contains(&key) {
+                    out.push(key);
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Run the reasoner and return a copy of `ontology` with inferred named
+/// `SubClassOf` and `ClassAssertion` axioms added.
 pub fn reason_and_materialize(ontology: &SetOntology<ArcStr>) -> SetOntology<ArcStr> {
     let translated = translate_ontology(ontology);
     let state = whelk_assert(&translated);
     materialize_inferences(ontology, &state).0
 }
 
-/// Insert inferred `SubClassOf` axioms into a clone of `ontology` and return it with the count.
+/// Insert inferred `SubClassOf` and `ClassAssertion` axioms into a clone of
+/// `ontology` and return it with the total count of axioms added.
 pub fn materialize_inferences(
     ontology: &SetOntology<ArcStr>,
     state: &ReasonerState,
 ) -> (SetOntology<ArcStr>, usize) {
-    let pairs = inferred_subclass_pairs(ontology, state);
-    let count = pairs.len();
+    let subclass_pairs = inferred_subclass_pairs(ontology, state);
+    let type_pairs = inferred_class_assertion_pairs(ontology, state);
+    let count = subclass_pairs.len() + type_pairs.len();
+
     let mut out = ontology.clone();
     let build = Build::<ArcStr>::new_arc();
-    for (sub, sup) in pairs {
+    for (sub, sup) in subclass_pairs {
         let axiom = SubClassOf {
             sub: ClassExpression::Class(build.class(sub)),
             sup: ClassExpression::Class(build.class(sup)),
         };
         out.insert(AnnotatedComponent::from(Component::SubClassOf(axiom)));
+    }
+    for (class, individual) in type_pairs {
+        let axiom = ClassAssertion {
+            ce: ClassExpression::Class(build.class(class)),
+            i: Individual::Named(build.named_individual(individual)),
+        };
+        out.insert(AnnotatedComponent::from(Component::ClassAssertion(axiom)));
     }
     (out, count)
 }
@@ -158,7 +232,10 @@ pub fn check(ontology: &SetOntology<ArcStr>, want_inferred: bool) -> Consistency
     let consistent = !thing_unsatisfiable(&state) && unsatisfiable_classes.is_empty();
 
     let inferred_axioms_count = if want_inferred {
-        Some(inferred_subclass_pairs(ontology, &state).len())
+        Some(
+            inferred_subclass_pairs(ontology, &state).len()
+                + inferred_class_assertion_pairs(ontology, &state).len(),
+        )
     } else {
         None
     };
@@ -437,6 +514,83 @@ mod tests {
             reasoned_subs.contains(&"http://example.org/GrandDog"),
             "with reasoning GrandDog should appear: {:?}",
             reasoned_subs
+        );
+    }
+
+    #[test]
+    fn materialize_includes_inferred_class_assertions() {
+        // fido is a Dog, Dog ⊑ Animal ⇒ infer fido is an Animal.
+        let onto = parse_ofn(
+            r#"Ontology(<http://example.org/abox>
+  Declaration(Class(<http://example.org/Animal>))
+  Declaration(Class(<http://example.org/Dog>))
+  SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)
+  Declaration(NamedIndividual(<http://example.org/fido>))
+  ClassAssertion(<http://example.org/Dog> <http://example.org/fido>)
+)"#,
+        );
+        let translated = translate_ontology(&onto);
+        let state = whelk_assert(&translated);
+        let pairs = inferred_class_assertion_pairs(&onto, &state);
+        assert!(
+            pairs.iter().any(|(c, i)| {
+                c == "http://example.org/Animal" && i == "http://example.org/fido"
+            }),
+            "expected inferred fido a Animal: {pairs:?}"
+        );
+
+        let (mat, _) = materialize_inferences(&onto, &state);
+        let has_type = mat.iter().any(|ac| {
+            matches!(
+                &ac.component,
+                Component::ClassAssertion(ClassAssertion {
+                    ce: ClassExpression::Class(Class(c)),
+                    i: Individual::Named(NamedIndividual(ind)),
+                }) if c.as_ref() == "http://example.org/Animal"
+                    && ind.as_ref() == "http://example.org/fido"
+            )
+        });
+        assert!(
+            has_type,
+            "materialized ontology should assert fido a Animal"
+        );
+    }
+
+    #[test]
+    fn with_reasoning_exposes_inferred_instance_type_to_sparql() {
+        // Without reasoning `?i a :Animal` is empty; with reasoning fido appears.
+        let onto = parse_ofn(
+            r#"Ontology(<http://example.org/abox>
+  Declaration(Class(<http://example.org/Animal>))
+  Declaration(Class(<http://example.org/Dog>))
+  SubClassOf(<http://example.org/Dog> <http://example.org/Animal>)
+  Declaration(NamedIndividual(<http://example.org/fido>))
+  ClassAssertion(<http://example.org/Dog> <http://example.org/fido>)
+)"#,
+        );
+        let q = r#"SELECT ?i WHERE { ?i <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/Animal> }"#;
+
+        let asserted_bytes = crate::ontology::owl_api::ontology_to_rdf_bytes(&onto).unwrap();
+        let asserted = crate::sparql::query(&[asserted_bytes], q).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&asserted).unwrap();
+        assert!(
+            v["results"]["bindings"].as_array().unwrap().is_empty(),
+            "without reasoning fido should not be a direct Animal: {asserted}"
+        );
+
+        let reasoned = reason_and_materialize(&onto);
+        let reasoned_bytes = crate::ontology::owl_api::ontology_to_rdf_bytes(&reasoned).unwrap();
+        let out = crate::sparql::query(&[reasoned_bytes], q).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let inds: Vec<&str> = v2["results"]["bindings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["i"]["value"].as_str().unwrap())
+            .collect();
+        assert!(
+            inds.contains(&"http://example.org/fido"),
+            "with reasoning fido should be an Animal: {inds:?}"
         );
     }
 
