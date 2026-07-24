@@ -518,7 +518,7 @@ pub struct SparqlQuery {
     /// When true, materialize OWL 2 EL inferred SubClassOf axioms (via whelk) before querying.
     /// Default false (asserted triples only).
     #[serde(default)]
-    pub with_reasoning: Option<bool>,
+    pub with_reasoning: bool,
 }
 
 impl SparqlQuery {
@@ -534,11 +534,9 @@ impl SparqlQuery {
             ));
         }
 
-        let with_reasoning = params.with_reasoning.unwrap_or(false);
-
         let mut mgr = manager.lock().await;
 
-        let json = if with_reasoning {
+        let json = if params.with_reasoning {
             let mut ontologies = Vec::with_capacity(params.owl_file_paths.len());
             for path in &params.owl_file_paths {
                 let api = mgr

@@ -91,7 +91,11 @@ fn asserted_named_subclass_pairs(ontology: &SetOntology<ArcStr>) -> HashSet<(Str
     pairs
 }
 
-/// Inferred named subsumptions that are not already asserted (excluding reflexive and Nothing).
+/// Inferred named subsumptions that are not already asserted.
+///
+/// Includes `SubClassOf(C owl:Nothing)` for unsatisfiable classes so materialization
+/// witnesses inconsistency. Excludes reflexive pairs, `owl:Nothing` as subclass, and
+/// `owl:Thing` as subclass.
 pub fn inferred_subclass_pairs(
     ontology: &SetOntology<ArcStr>,
     state: &ReasonerState,
@@ -101,13 +105,7 @@ pub fn inferred_subclass_pairs(
         .named_subsumptions()
         .into_iter()
         .filter_map(|(sub, sup)| {
-            if sub == sup || sub == OWL_NOTHING || sup == OWL_NOTHING {
-                return None;
-            }
-            // Skip trivial Thing ⊑ Thing and C ⊑ Thing if already asserted;
-            // still include C ⊑ Thing when not asserted? Usually asserted via hierarchy.
-            // Skip Thing as subclass of anything other than Thing.
-            if sub == OWL_THING {
+            if sub == sup || sub == OWL_NOTHING || sub == OWL_THING {
                 return None;
             }
             let key = (sub.to_string(), sup.to_string());
@@ -288,6 +286,46 @@ mod tests {
             report.unsatisfiable_classes
         );
         assert!(!report.consistent);
+    }
+
+    #[test]
+    fn materialize_includes_unsatisfiable_bottom_subsumption() {
+        let onto = parse_ofn(
+            r#"Ontology(<http://example.org/unsat>
+  Declaration(Class(<http://example.org/A>))
+  Declaration(Class(<http://example.org/B>))
+  Declaration(Class(<http://example.org/Unsat>))
+  DisjointClasses(<http://example.org/A> <http://example.org/B>)
+  SubClassOf(<http://example.org/Unsat> <http://example.org/A>)
+  SubClassOf(<http://example.org/Unsat> <http://example.org/B>)
+)"#,
+        );
+        let translated = translate_ontology(&onto);
+        let state = whelk_assert(&translated);
+        let pairs = inferred_subclass_pairs(&onto, &state);
+        assert!(
+            pairs
+                .iter()
+                .any(|(s, p)| { s == "http://example.org/Unsat" && p == OWL_NOTHING }),
+            "materialization should include Unsat ⊑ Nothing: {:?}",
+            pairs
+        );
+
+        let (mat, _) = materialize_inferences(&onto, &state);
+        let has_bottom = mat.iter().any(|ac| {
+            matches!(
+                &ac.component,
+                Component::SubClassOf(SubClassOf {
+                    sub: ClassExpression::Class(Class(sub)),
+                    sup: ClassExpression::Class(Class(sup)),
+                }) if sub.as_ref() == "http://example.org/Unsat"
+                    && sup.as_ref() == OWL_NOTHING
+            )
+        });
+        assert!(
+            has_bottom,
+            "materialized ontology should contain Unsat ⊑ Nothing"
+        );
     }
 
     #[test]

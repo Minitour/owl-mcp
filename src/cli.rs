@@ -574,7 +574,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                 tools::SparqlQuery {
                     owl_file_paths: files,
                     query,
-                    with_reasoning: Some(with_reasoning),
+                    with_reasoning,
                 },
                 &manager,
             )
