@@ -506,7 +506,8 @@ impl TestQuality {
     loaded together into an in-memory store (pass several paths to merge a schema with its ABox or \
     imports before querying), then the query is evaluated against the merged graph. \
     Returns SPARQL 1.1 JSON results for SELECT/ASK, and a list of N-Triples for CONSTRUCT/DESCRIBE. \
-    Queries run over asserted triples (no reasoning is applied)."
+    By default queries run over asserted triples only. Set with_reasoning=true to materialize \
+    OWL 2 EL entailments (via whelk) before querying so inferred subclass relationships are visible."
 )]
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct SparqlQuery {
@@ -514,6 +515,10 @@ pub struct SparqlQuery {
     pub owl_file_paths: Vec<String>,
     /// The SPARQL query string (SELECT, ASK, CONSTRUCT, or DESCRIBE)
     pub query: String,
+    /// When true, materialize OWL 2 EL inferred SubClassOf axioms (via whelk) before querying.
+    /// Default false (asserted triples only).
+    #[serde(default)]
+    pub with_reasoning: Option<bool>,
 }
 
 impl SparqlQuery {
@@ -529,18 +534,115 @@ impl SparqlQuery {
             ));
         }
 
+        let with_reasoning = params.with_reasoning.unwrap_or(false);
+
         let mut mgr = manager.lock().await;
-        let mut rdf_docs: Vec<Vec<u8>> = Vec::with_capacity(params.owl_file_paths.len());
-        for path in &params.owl_file_paths {
+
+        let json = if with_reasoning {
+            let mut ontologies = Vec::with_capacity(params.owl_file_paths.len());
+            for path in &params.owl_file_paths {
+                let api = mgr
+                    .get_or_load(path, false, false)
+                    .map_err(CallToolError::new)?;
+                ontologies.push(api.ontology.clone());
+            }
+            drop(mgr);
+
+            let refs: Vec<_> = ontologies.iter().collect();
+            let merged = crate::reasoning::merge_ontologies(&refs);
+            let reasoned = crate::reasoning::reason_and_materialize(&merged);
+            let bytes = crate::ontology::owl_api::ontology_to_rdf_bytes(&reasoned)
+                .map_err(CallToolError::new)?;
+            crate::sparql::query(&[bytes], &params.query).map_err(CallToolError::new)?
+        } else {
+            let mut rdf_docs: Vec<Vec<u8>> = Vec::with_capacity(params.owl_file_paths.len());
+            for path in &params.owl_file_paths {
+                let api = mgr
+                    .get_or_load(path, false, false)
+                    .map_err(CallToolError::new)?;
+                let bytes = api.to_rdf_bytes().map_err(CallToolError::new)?;
+                rdf_docs.push(bytes);
+            }
+            drop(mgr);
+            crate::sparql::query(&rdf_docs, &params.query).map_err(CallToolError::new)?
+        };
+
+        text_result(json)
+    }
+}
+
+// ── Consistency / reasoning ────────────────────────────────────────────────────
+
+#[mcp_tool(
+    name = "check_consistency",
+    description = "Run an OWL 2 EL reasoner (whelk; alias elk) over one or more OWL files and report \
+    logical consistency. Multiple paths are loaded and merged (same semantics as sparql_query), so a \
+    schema + ABox can be reasoned together. Returns JSON with: consistent (bool), \
+    unsatisfiable_classes (IRIs equivalent to owl:Nothing), optional inferred_axioms_count, and \
+    reasoner. Optionally write a materialized ontology (asserted + inferred SubClassOf axioms) to \
+    output_path. IMPORTANT: reasoning is limited to the OWL 2 EL profile — full OWL 2 DL \
+    inconsistency (cardinality restrictions, complex disjointness outside EL, etc.) is NOT detected. \
+    This matches robot reason --reasoner ELK."
+)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct CheckConsistency {
+    /// Absolute paths to the OWL files to load and merge before reasoning
+    pub owl_file_paths: Vec<String>,
+    /// Reasoner id: "whelk" (default) or "elk" (synonym). Only OWL 2 EL is supported.
+    pub reasoner: Option<String>,
+    /// If set, write the reasoned ontology (asserted + inferred SubClassOf) to this path
+    pub output_path: Option<String>,
+}
+
+impl CheckConsistency {
+    pub async fn run_tool(
+        params: Self,
+        manager: &Manager,
+    ) -> Result<CallToolResult, CallToolError> {
+        if params.owl_file_paths.is_empty() {
+            return Err(CallToolError::new(
+                crate::ontology::owl_api::OwlApiError::Parse(
+                    "owl_file_paths must contain at least one path".to_string(),
+                ),
+            ));
+        }
+
+        crate::reasoning::normalize_reasoner_id(params.reasoner.as_deref())
+            .map_err(|msg| CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(msg)))?;
+
+        let mut mgr = manager.lock().await;
+        let mut ontologies = Vec::with_capacity(params.owl_file_paths.len());
+        let mut prefixes = horned_owl::curie::PrefixMapping::default();
+        for (i, path) in params.owl_file_paths.iter().enumerate() {
             let api = mgr
                 .get_or_load(path, false, false)
                 .map_err(CallToolError::new)?;
-            let bytes = api.to_rdf_bytes().map_err(CallToolError::new)?;
-            rdf_docs.push(bytes);
+            if i == 0 {
+                prefixes = api.prefixes.clone();
+            }
+            ontologies.push(api.ontology.clone());
         }
         drop(mgr);
 
-        let json = crate::sparql::query(&rdf_docs, &params.query).map_err(CallToolError::new)?;
+        let refs: Vec<_> = ontologies.iter().collect();
+        let merged = crate::reasoning::merge_ontologies(&refs);
+
+        let report = if let Some(ref out) = params.output_path {
+            let (report, _) = crate::reasoning::check_and_maybe_write(
+                &merged,
+                &prefixes,
+                Some(std::path::Path::new(out)),
+                true,
+            )
+            .map_err(CallToolError::new)?;
+            report
+        } else {
+            crate::reasoning::check(&merged, false)
+        };
+
+        let json = serde_json::to_string_pretty(&report).map_err(|e| {
+            CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(e.to_string()))
+        })?;
         text_result(json)
     }
 }
@@ -621,5 +723,6 @@ tool_box!(
         TestQuality,
         TestPitfalls,
         SparqlQuery,
+        CheckConsistency,
     ]
 );

@@ -12,7 +12,7 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 
 ## Features
 
-- **16 MCP tools** — add, remove, search, and inspect axioms; add structured assertions (data/annotation/object property, class) with the literal value as a separate field; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality; run SPARQL queries
+- **17 MCP tools** — add, remove, search, and inspect axioms; add structured assertions (data/annotation/object property, class) with the literal value as a separate field; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality; check logical consistency with an OWL 2 EL reasoner; run SPARQL queries
 - **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
 - **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
 - **Live file watching** — automatically reloads ontology files modified externally
@@ -75,6 +75,8 @@ owl-mcp test-pitfalls --file ontology.owl
 owl-mcp test-quality --file ontology.owl
 owl-mcp sparql --file ontology.owl --query "SELECT ?c WHERE { ?c a owl:Class }"
 owl-mcp sparql --file schema.owl --file data.owl --query "ASK { ?i a :Plan }"
+owl-mcp reason --file ontology.owl
+owl-mcp reason --file schema.owl --file data.owl --output reasoned.ofn
 ```
 
 Run `owl-mcp --help` for a full list of commands, or `owl-mcp <command> --help` for details on a specific command.
@@ -154,13 +156,16 @@ For long or special-character literal values (containing `;`, `=`, `/`, `,`, quo
 
 `test_quality` uses the [whelk](https://github.com/INCATools/whelk-rs) OWL EL reasoner to compute inferred class hierarchy and returns a JSON report containing 19 raw and scaled metrics (ANOnto, AROnto, CBOOnto, CROnto, DITOnto, INROnto, LCOMOnto, NACOnto, NOCOnto, NOMOnto, RFCOnto, RROnto, TMOnto, WMCOnto, and variants), 22 subcharacteristics, 7 quality characteristics (Structural, Functional Adequacy, Maintainability, Operability, Reliability, Transferability, Compatibility), and an overall OQuaRE score on a 1–5 scale.
 
-### Querying
+### Querying and reasoning
 
 | Tool | Description |
 |---|---|
 | `sparql_query` | Run a SPARQL query over one or more OWL files |
+| `check_consistency` | Run an OWL 2 EL reasoner and report consistency / unsatisfiable classes |
 
-`sparql_query` takes `owl_file_paths` (one or more absolute paths) and a `query` string. Each file is serialized to RDF and loaded together into an in-memory [oxigraph](https://github.com/oxigraph/oxigraph) store, so passing several paths merges a schema with its ABox or imports before the query runs. `SELECT` and `ASK` return the standard [SPARQL 1.1 JSON results](https://www.w3.org/TR/sparql11-results-json/) format; `CONSTRUCT` and `DESCRIBE` return a list of N-Triples. Queries run over asserted triples (no reasoning is applied).
+`sparql_query` takes `owl_file_paths` (one or more absolute paths) and a `query` string. Each file is serialized to RDF and loaded together into an in-memory [oxigraph](https://github.com/oxigraph/oxigraph) store, so passing several paths merges a schema with its ABox or imports before the query runs. `SELECT` and `ASK` return the standard [SPARQL 1.1 JSON results](https://www.w3.org/TR/sparql11-results-json/) format; `CONSTRUCT` and `DESCRIBE` return a list of N-Triples. By default queries run over asserted triples only. Set `with_reasoning: true` to materialize OWL 2 EL entailments (via [whelk](https://github.com/INCATools/whelk-rs)) before querying so inferred subclass relationships are visible.
+
+`check_consistency` (CLI: `owl-mcp reason`) takes `owl_file_paths` (merged like `sparql_query`), an optional `reasoner` (`whelk` default; `elk` is accepted as a synonym), and an optional `output_path` to write a materialized ontology (asserted + inferred `SubClassOf` axioms). It returns JSON with `consistent`, `unsatisfiable_classes`, optional `inferred_axioms_count`, and `reasoner`. **Profile limitation:** whelk/ELK reason within **OWL 2 EL** only — full OWL 2 DL inconsistency (cardinality restrictions, complex disjointness outside EL, etc.) is **not** detected. This is a faithful replacement for `robot reason --reasoner ELK`, not a DL-complete reasoner.
 
 ## Development
 

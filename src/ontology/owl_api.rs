@@ -61,6 +61,52 @@ fn detect_format(path: &Path, content: &[u8]) -> OntologyFormat {
     }
 }
 
+/// Choose a write format from the output path extension alone (no content sniff).
+fn format_for_write(path: &Path) -> OntologyFormat {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("ofn") | Some("owx") => OntologyFormat::Ofn,
+        Some("rdf") => OntologyFormat::Rdf,
+        Some("owl") => OntologyFormat::Rdf,
+        _ => OntologyFormat::Ofn,
+    }
+}
+
+fn write_ontology_with_format(
+    path: &Path,
+    ontology: &SetOntology<ArcStr>,
+    prefixes: &PrefixMapping,
+    format: OntologyFormat,
+) -> Result<(), OwlApiError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
+        ontology.clone().into();
+    match format {
+        OntologyFormat::Ofn => {
+            let buf = ofn_write(Vec::new(), &cmo, Some(prefixes))?;
+            std::fs::write(path, buf)?;
+        }
+        OntologyFormat::Rdf => {
+            let file = std::fs::File::create(path)?;
+            let writer = BufWriter::new(file);
+            rdf_write(writer, &cmo)?;
+        }
+    }
+    Ok(())
+}
+
+/// Write an ontology to `path`, choosing OFN vs RDF/XML from the file extension.
+pub fn write_ontology_to_path(
+    path: &Path,
+    ontology: &SetOntology<ArcStr>,
+    prefixes: &PrefixMapping,
+) -> Result<(), OwlApiError> {
+    write_ontology_with_format(path, ontology, prefixes, format_for_write(path))
+}
+
 pub struct OwlApi {
     pub path: PathBuf,
     pub ontology: SetOntology<ArcStr>,
@@ -472,20 +518,7 @@ impl OwlApi {
     }
 
     pub fn save(&self) -> Result<(), OwlApiError> {
-        let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
-            self.ontology.clone().into();
-        match self.format {
-            OntologyFormat::Ofn => {
-                let buf = ofn_write(Vec::new(), &cmo, Some(&self.prefixes))?;
-                std::fs::write(&self.path, buf)?;
-            }
-            OntologyFormat::Rdf => {
-                let file = std::fs::File::create(&self.path)?;
-                let writer = BufWriter::new(file);
-                rdf_write(writer, &cmo)?;
-            }
-        }
-        Ok(())
+        write_ontology_with_format(&self.path, &self.ontology, &self.prefixes, self.format)
     }
 
     /// Serialize the in-memory ontology to RDF/XML bytes.
@@ -493,11 +526,7 @@ impl OwlApi {
     /// Used for SPARQL querying: the resulting triples are loaded into an
     /// in-memory RDF store regardless of the on-disk file format.
     pub fn to_rdf_bytes(&self) -> Result<Vec<u8>, OwlApiError> {
-        let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
-            self.ontology.clone().into();
-        let mut buf: Vec<u8> = Vec::new();
-        rdf_write(&mut buf, &cmo)?;
-        Ok(buf)
+        ontology_to_rdf_bytes(&self.ontology)
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -609,6 +638,15 @@ impl OwlApi {
             Err(_) => expand_wellknown_prefix(curie).unwrap_or_else(|| curie.to_string()),
         }
     }
+}
+
+/// Serialize a `SetOntology` to RDF/XML bytes (for SPARQL / oxigraph).
+pub fn ontology_to_rdf_bytes(ontology: &SetOntology<ArcStr>) -> Result<Vec<u8>, OwlApiError> {
+    let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
+        ontology.clone().into();
+    let mut buf: Vec<u8> = Vec::new();
+    rdf_write(&mut buf, &cmo)?;
+    Ok(buf)
 }
 
 /// Expand a CURIE using the standard W3C prefixes (rdf, rdfs, owl, xsd).
