@@ -652,18 +652,27 @@ pub fn ontology_to_rdf_bytes(ontology: &SetOntology<ArcStr>) -> Result<Vec<u8>, 
     Ok(buf)
 }
 
-/// Rewrite CURIEs in the `Ontology(...)` header and `Import(...)` directives to
-/// full `<iri>` form.
+/// Rewrite CURIEs that horned-owl's OFN writer emits but its OFN reader cannot
+/// parse back to full `<iri>` form.
 ///
-/// horned-owl's OFN writer compresses the ontology IRI, version IRI, and import
-/// IRIs to CURIEs whenever a declared prefix matches. When the ontology IRI is
-/// exactly a prefix namespace (empty local part) the writer emits an
-/// empty-local CURIE such as `Ontology(crf: ...)`, which the OFN reader cannot
-/// parse back — it silently corrupts reload and multi-file merges (the file
-/// round-trips through this crate's own in-memory state but breaks on a fresh
-/// load or in any other OWL tool). Emitting full IRIs in these header positions
-/// keeps files round-trippable and matches OWL tooling conventions. Axiom
-/// bodies are left untouched — their CURIEs re-parse fine and stay readable.
+/// The writer compresses IRIs to CURIEs whenever a declared prefix matches.
+/// When an IRI is *exactly* a prefix namespace it emits an **empty-local**
+/// CURIE such as `crf:` (e.g. `Ontology(crf: crf:2.0`, or an ontology-level
+/// `AnnotationAssertion(dcterms:license crf: "…")` whose subject is the
+/// ontology IRI). The reader rejects an empty local part (`expected
+/// SPARQL_PnLocal`), so a written file silently fails to reload — corrupting
+/// multi-file `sparql_query` / `check_consistency` merges and any external OWL
+/// tool. This pass:
+///   1. expands `Import(curie)` to `Import(<iri>)`,
+///   2. expands the ontology IRI + version IRI after `Ontology(`, and
+///   3. expands every remaining empty-local CURIE (`prefix:` with no local part)
+///      wherever it appears.
+///
+/// CURIEs with a local part (`crf:Fatigue`, `crf:2.0`, `obo:bfo.owl`) re-parse
+/// fine and are left untouched, keeping axiom bodies readable. Only *known*
+/// prefixes are expanded, and step 3 skips the prefix declaration `crf:=<…>`
+/// (its `:` is followed by `=`), so a `word:` sequence inside a literal with an
+/// undeclared prefix is preserved.
 fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
     // A CURIE token: a prefix name, a colon, then an optional local part
     // (empty local — e.g. `crf:` — is exactly the unparseable case we fix).
@@ -697,7 +706,21 @@ fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
         }
     });
 
-    step2.into_owned()
+    // 3. Expand every remaining empty-local CURIE (`prefix:` followed by a
+    //    delimiter, i.e. no local part) to `<iri>`. The delimiter is captured
+    //    and re-emitted. The `regex` crate has no look-around, so we consume and
+    //    restore it. `crf:=` (prefix decl) is not matched because `=` is not a
+    //    delimiter here; `crf:Fatigue` / `crf:2.0` are not matched because a
+    //    local-name char follows the colon.
+    let empty_re = Regex::new(r"([A-Za-z][A-Za-z0-9_.\-]*):([\s(),])").unwrap();
+    let step3 = empty_re.replace_all(&step2, |caps: &regex::Captures| {
+        match prefix_namespace(prefixes, &caps[1]) {
+            Some(ns) => format!("<{ns}>{}", &caps[2]),
+            None => caps[0].to_string(),
+        }
+    });
+
+    step3.into_owned()
 }
 
 /// Expand a single CURIE token (`prefix:local`, including empty local like
@@ -1265,6 +1288,37 @@ Ontology(
         assert!(
             !meta.is_empty(),
             "ontology ID must survive reload: {meta:?}"
+        );
+    }
+
+    #[test]
+    fn empty_local_curie_in_axiom_body_roundtrips() {
+        // An ontology-level annotation whose subject is the ontology IRI: horned
+        // serializes the subject as an empty-local CURIE (`crf:`) that the reader
+        // rejects. It must survive a fresh reload.
+        let f = empty_ofn();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            api.add_prefix("crf:", "http://example.org/crf/").unwrap();
+            api.set_ontology_iri(Some("http://example.org/crf/"), None)
+                .unwrap();
+            api.add_axiom(
+                "AnnotationAssertion(rdfs:label <http://example.org/crf/> \"CRF Ontology\"@en)",
+            )
+            .unwrap();
+        }
+
+        let content = std::fs::read_to_string(f.path()).unwrap();
+        assert!(
+            !content.contains("label crf: "),
+            "annotation subject should not be an empty-local CURIE: {content}"
+        );
+
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let axioms = api2.get_all_axioms(100, false, None);
+        assert!(
+            axioms.iter().any(|s| s.contains("CRF Ontology")),
+            "ontology annotation must survive reload: {axioms:?}"
         );
     }
 
