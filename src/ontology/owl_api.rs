@@ -87,7 +87,10 @@ fn write_ontology_with_format(
     match format {
         OntologyFormat::Ofn => {
             let buf = ofn_write(Vec::new(), &cmo, Some(prefixes))?;
-            std::fs::write(path, buf)?;
+            let text = String::from_utf8(buf)
+                .map_err(|e| OwlApiError::Parse(format!("OFN output not valid UTF-8: {e}")))?;
+            let fixed = expand_header_curies(&text, prefixes);
+            std::fs::write(path, fixed)?;
         }
         OntologyFormat::Rdf => {
             let file = std::fs::File::create(path)?;
@@ -649,6 +652,83 @@ pub fn ontology_to_rdf_bytes(ontology: &SetOntology<ArcStr>) -> Result<Vec<u8>, 
     Ok(buf)
 }
 
+/// Rewrite CURIEs in the `Ontology(...)` header and `Import(...)` directives to
+/// full `<iri>` form.
+///
+/// horned-owl's OFN writer compresses the ontology IRI, version IRI, and import
+/// IRIs to CURIEs whenever a declared prefix matches. When the ontology IRI is
+/// exactly a prefix namespace (empty local part) the writer emits an
+/// empty-local CURIE such as `Ontology(crf: ...)`, which the OFN reader cannot
+/// parse back — it silently corrupts reload and multi-file merges (the file
+/// round-trips through this crate's own in-memory state but breaks on a fresh
+/// load or in any other OWL tool). Emitting full IRIs in these header positions
+/// keeps files round-trippable and matches OWL tooling conventions. Axiom
+/// bodies are left untouched — their CURIEs re-parse fine and stay readable.
+fn expand_header_curies(ofn: &str, prefixes: &PrefixMapping) -> String {
+    // A CURIE token: a prefix name, a colon, then an optional local part
+    // (empty local — e.g. `crf:` — is exactly the unparseable case we fix).
+    // Excludes `(`, `<`, `>` so it never swallows an axiom keyword or an
+    // already-expanded `<iri>`.
+    const CURIE: &str = r"[A-Za-z][A-Za-z0-9_.\-]*:[^\s()<>]*";
+
+    // 1. Expand `Import(curie)` → `Import(<iri>)` wherever it appears (horned
+    //    may inline imports on the `Ontology(` line for small ontologies).
+    let import_re = Regex::new(&format!(r"Import\(\s*({CURIE})\s*\)")).unwrap();
+    let step1 = import_re.replace_all(ofn, |caps: &regex::Captures| {
+        match expand_iri_token(&caps[1], prefixes) {
+            Some(full) => format!("Import({full})"),
+            None => caps[0].to_string(),
+        }
+    });
+
+    // 2. Expand the ontology IRI and optional version IRI immediately after
+    //    `Ontology(`. Axiom keywords (`Declaration(`, `Import(<...>)`, …) have
+    //    no bare CURIE there, so an anonymous ontology is left untouched.
+    let onto_re = Regex::new(&format!(r"Ontology\(\s*({CURIE})(\s+({CURIE}))?")).unwrap();
+    let step2 = onto_re.replace(&step1, |caps: &regex::Captures| {
+        let iri = expand_iri_token(&caps[1], prefixes).unwrap_or_else(|| caps[1].to_string());
+        match caps.get(3) {
+            Some(v) => {
+                let viri = expand_iri_token(v.as_str(), prefixes)
+                    .unwrap_or_else(|| v.as_str().to_string());
+                format!("Ontology({iri} {viri}")
+            }
+            None => format!("Ontology({iri}"),
+        }
+    });
+
+    step2.into_owned()
+}
+
+/// Expand a single CURIE token (`prefix:local`, including empty local like
+/// `crf:`) to `<full-iri>`. Returns `None` when the token is already an
+/// `<iri>`, has no prefix separator, or the prefix is unknown.
+fn expand_iri_token(token: &str, prefixes: &PrefixMapping) -> Option<String> {
+    if token.starts_with('<') {
+        return None;
+    }
+    let (prefix, local) = token.split_once(':')?;
+    let ns = prefix_namespace(prefixes, prefix)?;
+    Some(format!("<{}{}>", ns, local))
+}
+
+/// Look up the namespace for a prefix name (empty string = default prefix),
+/// falling back to the well-known W3C prefixes (rdf/rdfs/owl/xsd).
+fn prefix_namespace(prefixes: &PrefixMapping, prefix: &str) -> Option<String> {
+    for (p, ns) in prefixes.mappings() {
+        if p == prefix {
+            return Some(ns.clone());
+        }
+    }
+    match prefix {
+        "rdf" => Some("http://www.w3.org/1999/02/22-rdf-syntax-ns#".to_string()),
+        "rdfs" => Some("http://www.w3.org/2000/01/rdf-schema#".to_string()),
+        "owl" => Some("http://www.w3.org/2002/07/owl#".to_string()),
+        "xsd" => Some("http://www.w3.org/2001/XMLSchema#".to_string()),
+        _ => None,
+    }
+}
+
 /// Expand a CURIE using the standard W3C prefixes (rdf, rdfs, owl, xsd).
 /// Returns `None` for anything that is not one of these well-known prefixes.
 fn expand_wellknown_prefix(curie: &str) -> Option<String> {
@@ -1139,6 +1219,81 @@ Ontology(
         let mut api = OwlApi::load(f.path(), true, false).unwrap();
         let result = api.set_ontology_iri(Some("http://example.org/x"), None);
         assert!(matches!(result, Err(OwlApiError::ReadOnly)));
+    }
+
+    // ── OFN header CURIE round-trip (ontology IRI == prefix namespace) ─────────
+
+    #[test]
+    fn ontology_iri_matching_prefix_roundtrips_on_reload() {
+        let f = empty_ofn();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            // Prefix namespace exactly equals the ontology IRI — this is what
+            // makes horned emit an empty-local CURIE (`Ontology(crf: ...)`).
+            api.add_prefix("crf:", "http://example.org/crf/").unwrap();
+            api.set_ontology_iri(
+                Some("http://example.org/crf/"),
+                Some("http://example.org/crf/2.0"),
+            )
+            .unwrap();
+            api.add_axiom("Declaration(Class(<http://example.org/crf/Fatigue>))")
+                .unwrap();
+        }
+
+        // The on-disk header must use full IRIs, not an unparseable `crf:` CURIE.
+        let content = std::fs::read_to_string(f.path()).unwrap();
+        assert!(
+            !content.contains("Ontology(crf:"),
+            "header should not contain empty-local CURIE: {content}"
+        );
+        assert!(
+            content.contains("Ontology(<http://example.org/crf/> <http://example.org/crf/2.0>"),
+            "header should use full IRIs: {content}"
+        );
+
+        // Fresh load from disk (new Build) — the path that silently lost axioms.
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        let axioms = api2.get_all_axioms(100, false, None);
+        assert!(
+            axioms.iter().any(|s| s.contains("Fatigue")),
+            "axioms must survive reload: {axioms:?}"
+        );
+        // Metadata still carries the ontology ID after reload (rendered as the
+        // `crf:` CURIE in-memory, which is fine — only the on-disk header must
+        // be a full IRI so the file re-parses).
+        let meta = api2.ontology_metadata();
+        assert!(
+            !meta.is_empty(),
+            "ontology ID must survive reload: {meta:?}"
+        );
+    }
+
+    #[test]
+    fn import_directive_uses_full_iri() {
+        let f = empty_ofn();
+        {
+            let mut api = OwlApi::load(f.path(), false, false).unwrap();
+            api.add_prefix("obo:", "http://purl.obolibrary.org/obo/")
+                .unwrap();
+            api.add_axiom("Import(<http://purl.obolibrary.org/obo/bfo.owl>)")
+                .unwrap();
+        }
+        let content = std::fs::read_to_string(f.path()).unwrap();
+        assert!(
+            !content.contains("Import(obo:"),
+            "import should not be a CURIE: {content}"
+        );
+        assert!(
+            content.contains("Import(<http://purl.obolibrary.org/obo/bfo.owl>)"),
+            "import should use full IRI: {content}"
+        );
+        // And it must re-parse.
+        let api2 = OwlApi::load(f.path(), false, false).unwrap();
+        assert!(api2
+            .ontology_metadata()
+            .iter()
+            .chain(api2.get_all_axioms(100, false, None).iter())
+            .any(|s| s.contains("bfo.owl")));
     }
 
     // ── structured assertions + long-literal robustness ───────────────────────
