@@ -235,6 +235,22 @@ pub enum CliCommand {
         /// Read the SPARQL query from a file instead of --query (use '-' for stdin), bypassing shell quoting
         #[arg(long)]
         query_file: Option<String>,
+        /// Materialize OWL 2 EL inferred SubClassOf axioms (via whelk) before querying
+        #[arg(long, default_value_t = false)]
+        with_reasoning: bool,
+    },
+
+    /// Check logical consistency with an OWL 2 EL reasoner (whelk / elk)
+    Reason {
+        /// Absolute path to an OWL file. Repeat --file to merge several (e.g. schema + ABox).
+        #[arg(long = "file", required = true)]
+        files: Vec<String>,
+        /// Reasoner id: whelk (default) or elk (synonym). OWL 2 EL only.
+        #[arg(long)]
+        reasoner: Option<String>,
+        /// Write the reasoned ontology (asserted + inferred SubClassOf) to this path
+        #[arg(long)]
+        output: Option<String>,
     },
 }
 
@@ -544,6 +560,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             files,
             query,
             query_file,
+            with_reasoning,
         } => {
             let query = match (query, query_file) {
                 (Some(q), _) => q,
@@ -557,6 +574,22 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                 tools::SparqlQuery {
                     owl_file_paths: files,
                     query,
+                    with_reasoning,
+                },
+                &manager,
+            )
+            .await
+        }
+        CliCommand::Reason {
+            files,
+            reasoner,
+            output,
+        } => {
+            tools::CheckConsistency::run_tool(
+                tools::CheckConsistency {
+                    owl_file_paths: files,
+                    reasoner,
+                    output_path: output,
                 },
                 &manager,
             )

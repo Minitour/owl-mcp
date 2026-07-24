@@ -3,6 +3,7 @@ mod handler;
 mod ontology;
 mod pitfalls;
 mod quality;
+mod reasoning;
 mod sparql;
 mod tools;
 

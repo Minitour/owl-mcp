@@ -70,6 +70,7 @@ impl ServerHandler for OwlMcpHandler {
             OwlTools::TestQuality(p) => TestQuality::run_tool(p, mgr).await,
             OwlTools::TestPitfalls(p) => TestPitfalls::run_tool(p, mgr).await,
             OwlTools::SparqlQuery(p) => SparqlQuery::run_tool(p, mgr).await,
+            OwlTools::CheckConsistency(p) => CheckConsistency::run_tool(p, mgr).await,
         }
     }
 
