@@ -651,12 +651,17 @@ impl OwlApi {
 
 /// Serialize a `SetOntology` to N-Triples bytes (for SPARQL / oxigraph).
 ///
-/// Uses horned-owl's non-pretty N-Triples writer so RDF collection axioms
+/// Uses horned-owl's non-pretty writer so RDF collection axioms
 /// (`rdf:first` / `rdf:rest` / `rdf:nil` on named subjects) do not panic in
 /// `pretty_rdf`'s RDF/XML pretty-printer.
+///
+/// Note: the format key `"ttl"` is horned-owl's CLI alias; internally it writes
+/// `oxrdfio::RdfFormat::NTriples` (not Turtle). That matches `sparql::query`,
+/// which loads with `RdfFormat::NTriples`. There is no separate `"nt"` key.
 pub fn ontology_to_rdf_bytes(ontology: &SetOntology<ArcStr>) -> Result<Vec<u8>, OwlApiError> {
     let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
         ontology.clone().into();
+    // "ttl" → N-Triples in horned-owl 1.4 (see write_to_rdf_format match arm).
     Ok(write_to_rdf_format(Vec::new(), &cmo, "ttl")?)
 }
 
