@@ -1,6 +1,6 @@
 //! SPARQL querying over OWL ontologies.
 //!
-//! One or more ontologies are serialized to RDF/XML and loaded together into an
+//! One or more ontologies are serialized to N-Triples and loaded together into an
 //! in-memory [`oxigraph`] store, then a SPARQL query is evaluated against the
 //! merged graph. Results are returned in the standard SPARQL 1.1 JSON results
 //! format for `SELECT`/`ASK`, and as a list of N-Triples for `CONSTRUCT`/`DESCRIBE`.
@@ -15,7 +15,7 @@ use crate::ontology::owl_api::OwlApiError;
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 
-/// Evaluate `query` over the RDF/XML documents in `rdf_docs` (merged into one graph).
+/// Evaluate `query` over the N-Triples documents in `rdf_docs` (merged into one graph).
 ///
 /// Returns a pretty-printed JSON string. `SELECT`/`ASK` use the W3C SPARQL JSON
 /// results format; `CONSTRUCT`/`DESCRIBE` return `{ "triples": [ ... ] }`.
@@ -24,7 +24,7 @@ pub fn query(rdf_docs: &[Vec<u8>], query: &str) -> Result<String, OwlApiError> {
 
     for doc in rdf_docs {
         store
-            .load_from_slice(RdfFormat::RdfXml, doc.as_slice())
+            .load_from_slice(RdfFormat::NTriples, doc.as_slice())
             .map_err(|e| OwlApiError::Parse(format!("RDF load error: {e}")))?;
     }
 
@@ -100,26 +100,21 @@ fn term_to_json(term: &Term) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ontology::owl_api::{ontology_to_rdf_bytes, OwlApi};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
-    // A minimal RDF/XML document: A rdfs:subClassOf B, and an instance a1 of A.
-    const RDFXML: &str = r#"<?xml version="1.0"?>
-<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
-         xmlns:owl="http://www.w3.org/2002/07/owl#"
-         xmlns:ex="http://example.org/">
-  <owl:Class rdf:about="http://example.org/A">
-    <rdfs:subClassOf rdf:resource="http://example.org/B"/>
-    <rdfs:label>Class A</rdfs:label>
-  </owl:Class>
-  <owl:Class rdf:about="http://example.org/B"/>
-  <owl:NamedIndividual rdf:about="http://example.org/a1">
-    <rdf:type rdf:resource="http://example.org/A"/>
-  </owl:NamedIndividual>
-</rdf:RDF>
+    // Minimal N-Triples: A rdfs:subClassOf B, label, and an instance a1 of A.
+    const NTRIPLES: &str = r#"<http://example.org/A> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://example.org/B> .
+<http://example.org/A> <http://www.w3.org/2000/01/rdf-schema#label> "Class A" .
+<http://example.org/A> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> .
+<http://example.org/B> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> .
+<http://example.org/a1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/A> .
+<http://example.org/a1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#NamedIndividual> .
 "#;
 
     fn docs() -> Vec<Vec<u8>> {
-        vec![RDFXML.as_bytes().to_vec()]
+        vec![NTRIPLES.as_bytes().to_vec()]
     }
 
     #[test]
@@ -164,17 +159,10 @@ mod tests {
     #[test]
     fn merges_multiple_documents() {
         // Schema in one doc, ABox in another — query relies on both.
-        let schema = r#"<?xml version="1.0"?>
-<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-         xmlns:owl="http://www.w3.org/2002/07/owl#">
-  <owl:Class rdf:about="http://example.org/A"/>
-</rdf:RDF>"#;
-        let abox = r#"<?xml version="1.0"?>
-<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-  <rdf:Description rdf:about="http://example.org/a1">
-    <rdf:type rdf:resource="http://example.org/A"/>
-  </rdf:Description>
-</rdf:RDF>"#;
+        let schema = r#"<http://example.org/A> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> .
+"#;
+        let abox = r#"<http://example.org/a1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/A> .
+"#;
         let docs = vec![schema.as_bytes().to_vec(), abox.as_bytes().to_vec()];
         let q = r#"PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             SELECT ?i WHERE { ?i rdf:type <http://example.org/A> }"#;
@@ -192,5 +180,50 @@ mod tests {
     fn invalid_query_errors() {
         let err = query(&docs(), "NOT SPARQL").unwrap_err();
         assert!(err.to_string().to_lowercase().contains("parse"));
+    }
+
+    /// Issue #12: named rdf:List subjects with rdf:first / rdf:rest / rdf:nil
+    /// must serialize and SPARQL without panicking in pretty_rdf.
+    #[test]
+    fn rdf_collection_axioms_serialize_and_query() {
+        let ofn = r#"Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(ex:=<http://example.org/>)
+Ontology(<http://example.org/repro/>
+  Declaration(NamedIndividual(ex:L))
+  Declaration(NamedIndividual(ex:a))
+  ObjectPropertyAssertion(rdf:first ex:L ex:a)
+  ObjectPropertyAssertion(rdf:rest ex:L rdf:nil)
+)
+"#;
+        let mut tmp = NamedTempFile::with_suffix(".ofn").unwrap();
+        write!(tmp, "{ofn}").unwrap();
+        tmp.flush().unwrap();
+
+        let api = OwlApi::load(tmp.path(), true, false).unwrap();
+        let bytes = ontology_to_rdf_bytes(&api.ontology).unwrap();
+        let nt = String::from_utf8_lossy(&bytes);
+        assert!(
+            nt.contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#first"),
+            "expected rdf:first in N-Triples:\n{nt}"
+        );
+        assert!(
+            nt.contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#rest"),
+            "expected rdf:rest in N-Triples:\n{nt}"
+        );
+        assert!(
+            nt.contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"),
+            "expected rdf:nil in N-Triples:\n{nt}"
+        );
+
+        let q = r#"PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            SELECT ?item WHERE { <http://example.org/L> rdf:first ?item }"#;
+        let out = query(&[bytes], q).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let bindings = v["results"]["bindings"].as_array().unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0]["item"]["value"].as_str().unwrap(),
+            "http://example.org/a"
+        );
     }
 }

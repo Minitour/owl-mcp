@@ -7,7 +7,7 @@ use horned_owl::curie::PrefixMapping;
 use horned_owl::io::ofn::reader::read_with_build as ofn_read;
 use horned_owl::io::ofn::writer::{write as ofn_write, AsFunctional};
 use horned_owl::io::rdf::reader::read_with_build as rdf_read;
-use horned_owl::io::rdf::writer::write as rdf_write;
+use horned_owl::io::rdf::writer::{write as rdf_write, write_to_rdf_format};
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{
     AnnotatedComponent, Annotation, AnnotationAssertion, AnnotationSubject, AnnotationValue,
@@ -530,7 +530,7 @@ impl OwlApi {
         write_ontology_with_format(&self.path, &self.ontology, &self.prefixes, self.format)
     }
 
-    /// Serialize the in-memory ontology to RDF/XML bytes.
+    /// Serialize the in-memory ontology to N-Triples bytes.
     ///
     /// Used for SPARQL querying: the resulting triples are loaded into an
     /// in-memory RDF store regardless of the on-disk file format.
@@ -649,13 +649,20 @@ impl OwlApi {
     }
 }
 
-/// Serialize a `SetOntology` to RDF/XML bytes (for SPARQL / oxigraph).
+/// Serialize a `SetOntology` to N-Triples bytes (for SPARQL / oxigraph).
+///
+/// Uses horned-owl's non-pretty writer so RDF collection axioms
+/// (`rdf:first` / `rdf:rest` / `rdf:nil` on named subjects) do not panic in
+/// `pretty_rdf`'s RDF/XML pretty-printer.
+///
+/// Note: the format key `"ttl"` is horned-owl's CLI alias; internally it writes
+/// `oxrdfio::RdfFormat::NTriples` (not Turtle). That matches `sparql::query`,
+/// which loads with `RdfFormat::NTriples`. There is no separate `"nt"` key.
 pub fn ontology_to_rdf_bytes(ontology: &SetOntology<ArcStr>) -> Result<Vec<u8>, OwlApiError> {
     let cmo: ComponentMappedOntology<ArcStr, Arc<AnnotatedComponent<ArcStr>>> =
         ontology.clone().into();
-    let mut buf: Vec<u8> = Vec::new();
-    rdf_write(&mut buf, &cmo)?;
-    Ok(buf)
+    // "ttl" → N-Triples in horned-owl 1.4 (see write_to_rdf_format match arm).
+    Ok(write_to_rdf_format(Vec::new(), &cmo, "ttl")?)
 }
 
 /// Rewrite CURIEs that horned-owl's OFN writer emits but its OFN reader cannot
