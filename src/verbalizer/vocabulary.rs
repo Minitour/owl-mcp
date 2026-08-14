@@ -14,6 +14,7 @@ pub enum Label {
 }
 
 pub fn default_ignore() -> HashSet<String> {
+    // Matches ontology-verbalizer test/default ignore set (foaf + metadata noise).
     [
         ns::OWL_ON_DATATYPE,
         "http://www.w3.org/2000/01/rdf-schema#seeAlso",
@@ -21,6 +22,8 @@ pub fn default_ignore() -> HashSet<String> {
         "http://www.w3.org/2000/01/rdf-schema#comment",
         ns::RDF_TYPE,
         "http://www.w3.org/2000/01/rdf-schema#isDefinedBy",
+        "http://www.w3.org/2003/06/sw-vocab-status/ns#term_status",
+        "http://www.w3.org/2000/01/rdf-schema#Class",
     ]
     .into_iter()
     .map(String::from)

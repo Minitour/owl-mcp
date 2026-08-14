@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use oxigraph::io::RdfFormat;
 use oxigraph::model::{NamedNode, NamedOrBlankNode, Term};
 use oxigraph::store::Store;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ontology::owl_api::OwlApiError;
 
@@ -23,7 +23,7 @@ use patterns::PATTERNS;
 use vocabulary::{list_typed, Label, Vocabulary};
 
 /// One verbalized concept (class or individual).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerbalizeEntry {
     pub root: String,
     pub fragment: String,
@@ -346,32 +346,10 @@ mod tests {
     use crate::ontology::owl_api::OwlApi;
     use tempfile::NamedTempFile;
 
-    const FIXTURE: &str = r#"Prefix(ex:=<http://example.org/pizza#>)
-Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
-Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
-Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
-Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
-Ontology(<http://example.org/pizza>
-Declaration(Class(ex:Pizza))
-Declaration(Class(ex:VegetarianPizza))
-Declaration(Class(ex:MeatPizza))
-Declaration(Class(ex:MozzarellaTopping))
-Declaration(Class(ex:TomatoTopping))
-Declaration(Class(ex:Margherita))
-Declaration(ObjectProperty(ex:hasTopping))
-AnnotationAssertion(rdfs:label ex:Pizza "Pizza")
-AnnotationAssertion(rdfs:label ex:VegetarianPizza "Vegetarian Pizza")
-AnnotationAssertion(rdfs:label ex:MeatPizza "Meat Pizza")
-AnnotationAssertion(rdfs:label ex:MozzarellaTopping "Mozzarella Topping")
-AnnotationAssertion(rdfs:label ex:TomatoTopping "Tomato Topping")
-AnnotationAssertion(rdfs:label ex:Margherita "Margherita")
-AnnotationAssertion(rdfs:label ex:hasTopping "has topping")
-SubClassOf(ex:VegetarianPizza ex:Pizza)
-DisjointClasses(ex:VegetarianPizza ex:MeatPizza)
-SubClassOf(ex:Margherita ex:VegetarianPizza)
-SubClassOf(ex:Margherita ObjectSomeValuesFrom(ex:hasTopping ObjectUnionOf(ex:MozzarellaTopping ex:TomatoTopping)))
-)
-"#;
+    const FIXTURE: &str = include_str!("../../tests/fixtures/pizza.ofn");
+    const GOLDEN_VEGETARIAN: &str =
+        include_str!("../../tests/fixtures/golden/vegetarian_pizza.cnl");
+    const GOLDEN_MARGHERITA: &str = include_str!("../../tests/fixtures/golden/margherita.cnl");
 
     fn verbalize_fixture() -> Vec<VerbalizeEntry> {
         let tmp = NamedTempFile::with_suffix(".ofn").unwrap();
@@ -392,10 +370,7 @@ SubClassOf(ex:Margherita ObjectSomeValuesFrom(ex:hasTopping ObjectUnionOf(ex:Moz
     fn verbalizes_subclass_and_disjoint() {
         let entries = verbalize_fixture();
         let veg = entry(&entries, "VegetarianPizza");
-        assert_eq!(
-            veg.text,
-            "vegetarian pizza is a type of a pizza.\nvegetarian pizza is different from a meat pizza."
-        );
+        assert_eq!(veg.text, GOLDEN_VEGETARIAN.trim_end());
         assert!(!veg.fragment.is_empty());
         assert!(veg.fragment.contains("vegetarian_pizza"));
         assert_eq!(veg.statements, 2);
@@ -405,10 +380,7 @@ SubClassOf(ex:Margherita ObjectSomeValuesFrom(ex:hasTopping ObjectUnionOf(ex:Moz
     fn verbalizes_restriction_union() {
         let entries = verbalize_fixture();
         let marg = entry(&entries, "Margherita");
-        assert_eq!(
-            marg.text,
-            "margherita is a type of a vegetarian pizza.\nmargherita is a type of at least has topping some any of (a mozzarella topping, and a tomato topping)."
-        );
+        assert_eq!(marg.text, GOLDEN_MARGHERITA.trim_end());
         assert!(marg.unique_concepts >= 2);
         assert!(marg.unique_relationships >= 1);
         assert!(!marg.fragment.is_empty());
@@ -428,9 +400,13 @@ SubClassOf(ex:Margherita ObjectSomeValuesFrom(ex:hasTopping ObjectUnionOf(ex:Moz
         .unwrap();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].root.contains("VegetarianPizza"));
-        assert_eq!(
-            entries[0].text,
-            "vegetarian pizza is a type of a pizza.\nvegetarian pizza is different from a meat pizza."
-        );
+        assert_eq!(entries[0].text, GOLDEN_VEGETARIAN.trim_end());
+    }
+
+    #[test]
+    fn default_ignore_covers_upstream_metadata_iris() {
+        let ignore = vocabulary::default_ignore();
+        assert!(ignore.contains("http://www.w3.org/2003/06/sw-vocab-status/ns#term_status"));
+        assert!(ignore.contains("http://www.w3.org/2000/01/rdf-schema#Class"));
     }
 }

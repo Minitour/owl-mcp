@@ -13,20 +13,34 @@ use crate::tools::*;
 #[derive(Clone)]
 pub struct OwlMcpHandler {
     pub manager: Arc<OntologyManager>,
+    /// Preferred protocol version advertised in `initialize` (stdio vs HTTP differ).
+    protocol_version: ProtocolVersion,
 }
 
 impl OwlMcpHandler {
-    pub fn new(manager: Arc<OntologyManager>) -> Self {
-        Self { manager }
+    pub fn for_stdio(manager: Arc<OntologyManager>) -> Self {
+        Self {
+            manager,
+            protocol_version: ProtocolVersion::V_2025_11_25,
+        }
+    }
+
+    pub fn for_http(manager: Arc<OntologyManager>) -> Self {
+        Self {
+            manager,
+            protocol_version: ProtocolVersion::V_2026_07_28,
+        }
     }
 }
 
+/// Map ontology/tool failures to MCP tool-level errors (`isError: true`) so clients
+/// surface the message instead of an opaque JSON-RPC `-32603`.
 fn map_tool(result: Result<Vec<String>, OwlApiError>) -> Result<CallToolResult, McpError> {
     match result {
         Ok(lines) => Ok(CallToolResult::success(
             lines.into_iter().map(ContentBlock::text).collect(),
         )),
-        Err(e) => Err(McpError::internal_error(e.to_string(), None)),
+        Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())])),
     }
 }
 
@@ -277,7 +291,7 @@ impl ServerHandler for OwlMcpHandler {
                     "High-performance MCP server for OWL ontology management, written in Rust.",
                 ),
         )
-        .with_protocol_version(ProtocolVersion::V_2026_07_28)
+        .with_protocol_version(self.protocol_version.clone())
         .with_instructions(
             "Use the OWL tools to load, query and modify OWL ontology files. \
              Axioms are expressed in OWL Functional Syntax. \
@@ -322,5 +336,37 @@ impl ServerHandler for OwlMcpHandler {
         let paths = self.manager.active_paths().await;
         let text = serde_json::to_string_pretty(&paths).unwrap_or_else(|e| format!("Error: {e}"));
         Ok(ReadResourceResult::new(vec![ResourceContents::text(text, uri.clone())]).into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ontology::owl_api::OwlApiError;
+
+    #[test]
+    fn stdio_advertises_2025_11_25() {
+        let handler = OwlMcpHandler::for_stdio(Arc::new(OntologyManager::new()));
+        assert_eq!(
+            handler.get_info().protocol_version,
+            ProtocolVersion::V_2025_11_25
+        );
+    }
+
+    #[test]
+    fn http_advertises_2026_07_28() {
+        let handler = OwlMcpHandler::for_http(Arc::new(OntologyManager::new()));
+        assert_eq!(
+            handler.get_info().protocol_version,
+            ProtocolVersion::V_2026_07_28
+        );
+    }
+
+    #[test]
+    fn map_tool_returns_is_error_not_protocol_error() {
+        let err = OwlApiError::Parse("missing file".into());
+        let result = map_tool(Err(err)).unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(!result.content.is_empty());
     }
 }

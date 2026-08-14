@@ -552,3 +552,57 @@ impl Verbalize {
         Ok(text(json))
     }
 }
+
+#[cfg(test)]
+mod verbalize_tests {
+    use super::*;
+    use crate::verbalizer::VerbalizeEntry;
+
+    const FIXTURE: &str = include_str!("../tests/fixtures/pizza.ofn");
+    const GOLDEN_VEGETARIAN: &str =
+        include_str!("../tests/fixtures/golden/vegetarian_pizza.cnl");
+    const GOLDEN_MARGHERITA: &str = include_str!("../tests/fixtures/golden/margherita.cnl");
+
+    #[tokio::test]
+    async fn verbalize_tool_with_iri_matches_golden() {
+        let tmp = tempfile::NamedTempFile::with_suffix(".ofn").unwrap();
+        std::fs::write(tmp.path(), FIXTURE).unwrap();
+        let manager = Arc::new(OntologyManager::new());
+        let lines = Verbalize::run(
+            Verbalize {
+                owl_file_path: tmp.path().to_string_lossy().into_owned(),
+                iri: Some("http://example.org/pizza#VegetarianPizza".into()),
+                limit: 10,
+            },
+            &manager,
+        )
+        .await
+        .unwrap();
+        let entries: Vec<VerbalizeEntry> = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text, GOLDEN_VEGETARIAN.trim_end());
+    }
+
+    #[tokio::test]
+    async fn verbalize_tool_without_iri_includes_margherita_golden() {
+        let tmp = tempfile::NamedTempFile::with_suffix(".ofn").unwrap();
+        std::fs::write(tmp.path(), FIXTURE).unwrap();
+        let manager = Arc::new(OntologyManager::new());
+        let lines = Verbalize::run(
+            Verbalize {
+                owl_file_path: tmp.path().to_string_lossy().into_owned(),
+                iri: None,
+                limit: 20,
+            },
+            &manager,
+        )
+        .await
+        .unwrap();
+        let entries: Vec<VerbalizeEntry> = serde_json::from_str(&lines[0]).unwrap();
+        let marg = entries
+            .iter()
+            .find(|e| e.root.contains("Margherita"))
+            .expect("Margherita entry");
+        assert_eq!(marg.text, GOLDEN_MARGHERITA.trim_end());
+    }
+}

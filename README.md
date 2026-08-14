@@ -59,7 +59,6 @@ Options:
   --transport <stdio|http>   Transport to use [default: stdio]
   --host <HOST>              Host to bind (HTTP only) [default: 127.0.0.1]
   --port <PORT>              Port to bind (HTTP only) [default: 8080]
-  --sse-support              Enable legacy SSE endpoint [unused; HTTP is Streamable HTTP JSON only]
 ```
 
 ### CLI mode

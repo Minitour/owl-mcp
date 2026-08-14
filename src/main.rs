@@ -47,10 +47,6 @@ enum Command {
         /// Port to bind (HTTP transport only)
         #[arg(long, default_value_t = 8080, env = "OWL_MCP_PORT")]
         port: u16,
-
-        /// Enable legacy SSE endpoint alongside Streamable HTTP (HTTP transport only)
-        #[arg(long, default_value_t = true, env = "OWL_MCP_SSE_SUPPORT")]
-        sse_support: bool,
     },
 
     #[command(flatten)]
@@ -76,20 +72,20 @@ async fn main() {
             transport,
             host,
             port,
-            sse_support,
         } => {
             let _watcher = spawn_watcher(manager.clone());
-            let handler = OwlMcpHandler::new(manager);
 
             match transport {
                 Transport::Stdio => {
+                    let handler = OwlMcpHandler::for_stdio(manager);
                     if let Err(e) = run_stdio(handler).await {
                         eprintln!("Server error: {}", e);
                         std::process::exit(1);
                     }
                 }
                 Transport::Http => {
-                    if let Err(e) = run_http(handler, host, port, sse_support).await {
+                    let handler = OwlMcpHandler::for_http(manager);
+                    if let Err(e) = run_http(handler, host, port).await {
                         eprintln!("Server error: {}", e);
                         std::process::exit(1);
                     }
@@ -112,7 +108,6 @@ async fn run_http(
     handler: OwlMcpHandler,
     host: String,
     port: u16,
-    _sse_support: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use rmcp::transport::streamable_http_server::{
         session::never::NeverSessionManager, StreamableHttpServerConfig, StreamableHttpService,
@@ -124,7 +119,7 @@ async fn run_http(
         .with_json_response(true);
 
     let service = StreamableHttpService::new(
-        move || Ok(OwlMcpHandler::new(manager.clone())),
+        move || Ok(OwlMcpHandler::for_http(manager.clone())),
         std::sync::Arc::new(NeverSessionManager::default()),
         config,
     );
