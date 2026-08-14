@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
 use clap::Subcommand;
-use rust_mcp_sdk::schema::{CallToolResult, ContentBlock};
-use tokio::sync::Mutex;
 
 use crate::ontology::manager::OntologyManager;
 use crate::tools;
 
-type Manager = Arc<Mutex<OntologyManager>>;
+type Manager = Arc<OntologyManager>;
 
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
@@ -252,6 +250,19 @@ pub enum CliCommand {
         #[arg(long)]
         output: Option<String>,
     },
+
+    /// Convert OWL axioms into Controlled Natural Language (pseudo-text)
+    Verbalize {
+        /// Absolute path to the OWL file
+        #[arg(long)]
+        file: String,
+        /// Optional IRI or CURIE of a single class or individual to verbalize
+        #[arg(long)]
+        iri: Option<String>,
+        /// Maximum number of entities when --iri is omitted
+        #[arg(long, default_value_t = 100)]
+        limit: u64,
+    },
 }
 
 /// Read the full contents of a file, or stdin when `path` is "-".
@@ -328,18 +339,16 @@ fn resolve_axioms(axioms: Vec<String>, axioms_file: Option<String>) -> Vec<Strin
     parsed
 }
 
-fn print_result(result: CallToolResult) {
-    for block in result.content {
-        if let ContentBlock::TextContent(tc) = block {
-            println!("{}", tc.text);
-        }
+fn print_result(lines: Vec<String>) {
+    for line in lines {
+        println!("{line}");
     }
 }
 
 pub async fn dispatch(cmd: CliCommand, manager: Manager) {
     let result = match cmd {
         CliCommand::AddAxiom { file, axiom } => {
-            tools::AddAxiom::run_tool(
+            tools::AddAxiom::run(
                 tools::AddAxiom {
                     owl_file_path: file,
                     axiom_str: axiom,
@@ -354,7 +363,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             axioms_file,
         } => {
             let axiom_strs = resolve_axioms(axioms, axioms_file);
-            tools::AddAxioms::run_tool(
+            tools::AddAxioms::run(
                 tools::AddAxioms {
                     owl_file_path: file,
                     axiom_strs,
@@ -373,7 +382,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             lang,
         } => {
             let value = resolve_value(value, value_file);
-            tools::AddDataPropertyAssertion::run_tool(
+            tools::AddDataPropertyAssertion::run(
                 tools::AddDataPropertyAssertion {
                     owl_file_path: file,
                     property,
@@ -396,7 +405,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             lang,
         } => {
             let value = resolve_value(value, value_file);
-            tools::AddAnnotationAssertion::run_tool(
+            tools::AddAnnotationAssertion::run(
                 tools::AddAnnotationAssertion {
                     owl_file_path: file,
                     property,
@@ -415,7 +424,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             subject,
             target,
         } => {
-            tools::AddObjectPropertyAssertion::run_tool(
+            tools::AddObjectPropertyAssertion::run(
                 tools::AddObjectPropertyAssertion {
                     owl_file_path: file,
                     property,
@@ -431,7 +440,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             class,
             individual,
         } => {
-            tools::AddClassAssertion::run_tool(
+            tools::AddClassAssertion::run(
                 tools::AddClassAssertion {
                     owl_file_path: file,
                     class,
@@ -442,7 +451,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             .await
         }
         CliCommand::RemoveAxiom { file, axiom } => {
-            tools::RemoveAxiom::run_tool(
+            tools::RemoveAxiom::run(
                 tools::RemoveAxiom {
                     owl_file_path: file,
                     axiom_str: axiom,
@@ -458,7 +467,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             include_labels,
             annotation_property,
         } => {
-            tools::FindAxioms::run_tool(
+            tools::FindAxioms::run(
                 tools::FindAxioms {
                     owl_file_path: file,
                     pattern,
@@ -476,7 +485,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             include_labels,
             annotation_property,
         } => {
-            tools::GetAllAxioms::run_tool(
+            tools::GetAllAxioms::run(
                 tools::GetAllAxioms {
                     owl_file_path: file,
                     limit,
@@ -488,7 +497,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             .await
         }
         CliCommand::AddPrefix { file, prefix, uri } => {
-            tools::AddPrefix::run_tool(
+            tools::AddPrefix::run(
                 tools::AddPrefix {
                     owl_file_path: file,
                     prefix,
@@ -499,7 +508,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             .await
         }
         CliCommand::OntologyMetadata { file } => {
-            tools::OntologyMetadata::run_tool(
+            tools::OntologyMetadata::run(
                 tools::OntologyMetadata {
                     owl_file_path: file,
                 },
@@ -512,7 +521,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             iri,
             annotation_property,
         } => {
-            tools::GetLabelsForIri::run_tool(
+            tools::GetLabelsForIri::run(
                 tools::GetLabelsForIri {
                     owl_file_path: file,
                     iri,
@@ -527,7 +536,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             iri,
             version_iri,
         } => {
-            tools::SetOntologyIri::run_tool(
+            tools::SetOntologyIri::run(
                 tools::SetOntologyIri {
                     owl_file_path: file,
                     iri,
@@ -538,7 +547,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             .await
         }
         CliCommand::TestQuality { file } => {
-            tools::TestQuality::run_tool(
+            tools::TestQuality::run(
                 tools::TestQuality {
                     owl_file_path: file,
                 },
@@ -547,7 +556,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             .await
         }
         CliCommand::TestPitfalls { file, pitfalls } => {
-            tools::TestPitfalls::run_tool(
+            tools::TestPitfalls::run(
                 tools::TestPitfalls {
                     owl_file_path: file,
                     pitfalls,
@@ -570,7 +579,7 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
                     std::process::exit(1);
                 }
             };
-            tools::SparqlQuery::run_tool(
+            tools::SparqlQuery::run(
                 tools::SparqlQuery {
                     owl_file_paths: files,
                     query,
@@ -585,11 +594,22 @@ pub async fn dispatch(cmd: CliCommand, manager: Manager) {
             reasoner,
             output,
         } => {
-            tools::CheckConsistency::run_tool(
+            tools::CheckConsistency::run(
                 tools::CheckConsistency {
                     owl_file_paths: files,
                     reasoner,
                     output_path: output,
+                },
+                &manager,
+            )
+            .await
+        }
+        CliCommand::Verbalize { file, iri, limit } => {
+            tools::Verbalize::run(
+                tools::Verbalize {
+                    owl_file_path: file,
+                    iri,
+                    limit,
                 },
                 &manager,
             )
