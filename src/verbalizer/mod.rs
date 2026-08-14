@@ -351,6 +351,11 @@ mod tests {
         include_str!("../../tests/fixtures/golden/vegetarian_pizza.cnl");
     const GOLDEN_MARGHERITA: &str = include_str!("../../tests/fixtures/golden/margherita.cnl");
 
+    /// Golden files may be checked out with CRLF on Windows; CNL output uses LF.
+    fn golden(s: &str) -> String {
+        s.replace("\r\n", "\n").trim_end().to_string()
+    }
+
     fn verbalize_fixture() -> Vec<VerbalizeEntry> {
         let tmp = NamedTempFile::with_suffix(".ofn").unwrap();
         std::fs::write(tmp.path(), FIXTURE).unwrap();
@@ -370,7 +375,7 @@ mod tests {
     fn verbalizes_subclass_and_disjoint() {
         let entries = verbalize_fixture();
         let veg = entry(&entries, "VegetarianPizza");
-        assert_eq!(veg.text, GOLDEN_VEGETARIAN.trim_end());
+        assert_eq!(veg.text, golden(GOLDEN_VEGETARIAN));
         assert!(!veg.fragment.is_empty());
         assert!(veg.fragment.contains("vegetarian_pizza"));
         assert_eq!(veg.statements, 2);
@@ -380,7 +385,7 @@ mod tests {
     fn verbalizes_restriction_union() {
         let entries = verbalize_fixture();
         let marg = entry(&entries, "Margherita");
-        assert_eq!(marg.text, GOLDEN_MARGHERITA.trim_end());
+        assert_eq!(marg.text, golden(GOLDEN_MARGHERITA));
         assert!(marg.unique_concepts >= 2);
         assert!(marg.unique_relationships >= 1);
         assert!(!marg.fragment.is_empty());
@@ -400,7 +405,7 @@ mod tests {
         .unwrap();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].root.contains("VegetarianPizza"));
-        assert_eq!(entries[0].text, GOLDEN_VEGETARIAN.trim_end());
+        assert_eq!(entries[0].text, golden(GOLDEN_VEGETARIAN));
     }
 
     #[test]

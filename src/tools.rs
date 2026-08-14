@@ -562,6 +562,11 @@ mod verbalize_tests {
     const GOLDEN_VEGETARIAN: &str = include_str!("../tests/fixtures/golden/vegetarian_pizza.cnl");
     const GOLDEN_MARGHERITA: &str = include_str!("../tests/fixtures/golden/margherita.cnl");
 
+    /// Golden files may be checked out with CRLF on Windows; CNL output uses LF.
+    fn golden(s: &str) -> String {
+        s.replace("\r\n", "\n").trim_end().to_string()
+    }
+
     #[tokio::test]
     async fn verbalize_tool_with_iri_matches_golden() {
         let tmp = tempfile::NamedTempFile::with_suffix(".ofn").unwrap();
@@ -579,7 +584,7 @@ mod verbalize_tests {
         .unwrap();
         let entries: Vec<VerbalizeEntry> = serde_json::from_str(&lines[0]).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].text, GOLDEN_VEGETARIAN.trim_end());
+        assert_eq!(entries[0].text, golden(GOLDEN_VEGETARIAN));
     }
 
     #[tokio::test]
@@ -602,6 +607,6 @@ mod verbalize_tests {
             .iter()
             .find(|e| e.root.contains("Margherita"))
             .expect("Margherita entry");
-        assert_eq!(marg.text, GOLDEN_MARGHERITA.trim_end());
+        assert_eq!(marg.text, golden(GOLDEN_MARGHERITA));
     }
 }
