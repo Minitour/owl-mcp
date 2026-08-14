@@ -40,7 +40,9 @@ fn map_tool(result: Result<Vec<String>, OwlApiError>) -> Result<CallToolResult, 
         Ok(lines) => Ok(CallToolResult::success(
             lines.into_iter().map(ContentBlock::text).collect(),
         )),
-        Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())])),
+        Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(
+            e.to_string(),
+        )])),
     }
 }
 

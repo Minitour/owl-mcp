@@ -559,8 +559,7 @@ mod verbalize_tests {
     use crate::verbalizer::VerbalizeEntry;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/pizza.ofn");
-    const GOLDEN_VEGETARIAN: &str =
-        include_str!("../tests/fixtures/golden/vegetarian_pizza.cnl");
+    const GOLDEN_VEGETARIAN: &str = include_str!("../tests/fixtures/golden/vegetarian_pizza.cnl");
     const GOLDEN_MARGHERITA: &str = include_str!("../tests/fixtures/golden/margherita.cnl");
 
     #[tokio::test]
