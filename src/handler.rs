@@ -1,214 +1,326 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use rust_mcp_sdk::{
-    mcp_server::ServerHandler,
-    schema::{
-        schema_utils::CallToolError, CallToolRequestParams, CallToolResult, ContentBlock,
-        GetPromptRequestParams, GetPromptResult, ListPromptsResult, ListResourcesResult,
-        ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument, PromptMessage,
-        ReadResourceContent, ReadResourceRequestParams, ReadResourceResult, Resource, Role,
-        RpcError, TextContent, TextResourceContents,
-    },
-    McpServer,
+use rmcp::{
+    handler::server::wrapper::Parameters, model::*, prompt, prompt_handler, prompt_router, tool,
+    tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
-use tokio::sync::Mutex;
+use serde::Deserialize;
 
 use crate::ontology::manager::OntologyManager;
+use crate::ontology::owl_api::OwlApiError;
 use crate::tools::*;
 
+#[derive(Clone)]
 pub struct OwlMcpHandler {
-    pub manager: Arc<Mutex<OntologyManager>>,
+    pub manager: Arc<OntologyManager>,
 }
 
 impl OwlMcpHandler {
-    pub fn new(manager: Arc<Mutex<OntologyManager>>) -> Self {
+    pub fn new(manager: Arc<OntologyManager>) -> Self {
         Self { manager }
     }
 }
 
-#[async_trait]
+fn map_tool(result: Result<Vec<String>, OwlApiError>) -> Result<CallToolResult, McpError> {
+    match result {
+        Ok(lines) => Ok(CallToolResult::success(
+            lines.into_iter().map(ContentBlock::text).collect(),
+        )),
+        Err(e) => Err(McpError::internal_error(e.to_string(), None)),
+    }
+}
+
+#[tool_router]
+impl OwlMcpHandler {
+    #[tool(
+        description = "Add a single OWL axiom in functional syntax to the ontology file. E.g. SubClassOf(:Dog :Animal)"
+    )]
+    async fn add_axiom(
+        &self,
+        Parameters(params): Parameters<AddAxiom>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddAxiom::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Add multiple OWL axioms in functional syntax to the ontology file. Stops on the first failure."
+    )]
+    async fn add_axioms(
+        &self,
+        Parameters(params): Parameters<AddAxioms>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddAxioms::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Add a data property assertion (DataPropertyAssertion) where the literal VALUE is supplied as a separate field. Use this instead of add_axiom for long or special-character values."
+    )]
+    async fn add_data_property_assertion(
+        &self,
+        Parameters(params): Parameters<AddDataPropertyAssertion>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddDataPropertyAssertion::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Add an annotation assertion (AnnotationAssertion) where the literal VALUE is supplied as a separate field. Use this instead of add_axiom for long or special-character values."
+    )]
+    async fn add_annotation_assertion(
+        &self,
+        Parameters(params): Parameters<AddAnnotationAssertion>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddAnnotationAssertion::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Add an object property assertion (ObjectPropertyAssertion) linking a subject individual to a target individual via an object property."
+    )]
+    async fn add_object_property_assertion(
+        &self,
+        Parameters(params): Parameters<AddObjectPropertyAssertion>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddObjectPropertyAssertion::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Add a class assertion (ClassAssertion) stating that an individual is an instance of a class."
+    )]
+    async fn add_class_assertion(
+        &self,
+        Parameters(params): Parameters<AddClassAssertion>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddClassAssertion::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Remove a single OWL axiom (given in functional syntax) from the ontology file."
+    )]
+    async fn remove_axiom(
+        &self,
+        Parameters(params): Parameters<RemoveAxiom>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(RemoveAxiom::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Search axioms in an OWL file using a regex pattern. Returns matching axioms (up to limit)."
+    )]
+    async fn find_axioms(
+        &self,
+        Parameters(params): Parameters<FindAxioms>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(FindAxioms::run(params, &self.manager).await)
+    }
+
+    #[tool(description = "Return all axioms in the OWL file (up to limit).")]
+    async fn get_all_axioms(
+        &self,
+        Parameters(params): Parameters<GetAllAxioms>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(GetAllAxioms::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Add a prefix mapping (e.g. prefix='ex:' uri='http://example.org/') to the ontology file."
+    )]
+    async fn add_prefix(
+        &self,
+        Parameters(params): Parameters<AddPrefix>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(AddPrefix::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Return the ontology-level annotation axioms (metadata header) for the given OWL file."
+    )]
+    async fn ontology_metadata(
+        &self,
+        Parameters(params): Parameters<OntologyMetadata>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(OntologyMetadata::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Return all label values for a given IRI or CURIE in the ontology file. Defaults to rdfs:label."
+    )]
+    async fn get_labels_for_iri(
+        &self,
+        Parameters(params): Parameters<GetLabelsForIri>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(GetLabelsForIri::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Set or update the ontology IRI (and optional version IRI) for an OWL file. Pass iri=null to clear the ontology IRI."
+    )]
+    async fn set_ontology_iri(
+        &self,
+        Parameters(params): Parameters<SetOntologyIri>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(SetOntologyIri::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Evaluate the quality of an OWL ontology using the OQuaRE framework (based on ISO/IEC 25000 SQuaRE). Returns a JSON report with metrics, characteristics, and an overall 1-5 score."
+    )]
+    async fn test_quality(
+        &self,
+        Parameters(params): Parameters<TestQuality>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(TestQuality::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Scan an OWL ontology for common modeling pitfalls (inspired by OOPS!). Returns a JSON report listing detected issues, their severity, and affected elements."
+    )]
+    async fn test_pitfalls(
+        &self,
+        Parameters(params): Parameters<TestPitfalls>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(TestPitfalls::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Run a SPARQL query over one or more OWL files. Returns SPARQL 1.1 JSON results for SELECT/ASK, and N-Triples for CONSTRUCT/DESCRIBE. Set with_reasoning=true to materialize OWL 2 EL entailments before querying."
+    )]
+    async fn sparql_query(
+        &self,
+        Parameters(params): Parameters<SparqlQuery>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(SparqlQuery::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Run an OWL 2 EL reasoner (whelk; alias elk) over one or more OWL files and report logical consistency. Reasoning is limited to the OWL 2 EL profile."
+    )]
+    async fn check_consistency(
+        &self,
+        Parameters(params): Parameters<CheckConsistency>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(CheckConsistency::run(params, &self.manager).await)
+    }
+
+    #[tool(
+        description = "Convert OWL axioms into Controlled Natural Language (pseudo-text) and a Turtle fragment. If iri is omitted, verbalizes owl:Class and owl:NamedIndividual entities (up to limit)."
+    )]
+    async fn verbalize(
+        &self,
+        Parameters(params): Parameters<Verbalize>,
+    ) -> Result<CallToolResult, McpError> {
+        map_tool(Verbalize::run(params, &self.manager).await)
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TopicArgs {
+    /// The topic to search axioms for
+    topic: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SubclassArgs {
+    /// The subclass (child class)
+    child: String,
+    /// The superclass (parent class)
+    parent: String,
+}
+
+#[prompt_router]
+impl OwlMcpHandler {
+    #[prompt(
+        name = "ask_for_axioms_about",
+        description = "Generate a prompt asking what axioms include a given topic string"
+    )]
+    async fn ask_for_axioms_about(
+        &self,
+        Parameters(args): Parameters<TopicArgs>,
+    ) -> Vec<PromptMessage> {
+        vec![PromptMessage::new_text(
+            Role::User,
+            format!("What axioms include the string '{}'?", args.topic),
+        )]
+    }
+
+    #[prompt(
+        name = "add_subclass_of",
+        description = "Generate a prompt to add a subClassOf axiom"
+    )]
+    async fn add_subclass_of(
+        &self,
+        Parameters(args): Parameters<SubclassArgs>,
+    ) -> Vec<PromptMessage> {
+        vec![PromptMessage::new_text(
+            Role::User,
+            format!(
+                "Add a subClassOf axiom where the subclass is '{}' and the superclass is '{}'",
+                args.child, args.parent
+            ),
+        )]
+    }
+}
+
+#[tool_handler]
+#[prompt_handler]
 impl ServerHandler for OwlMcpHandler {
-    async fn handle_list_tools_request(
-        &self,
-        _params: Option<PaginatedRequestParams>,
-        _runtime: Arc<dyn McpServer>,
-    ) -> Result<ListToolsResult, RpcError> {
-        Ok(ListToolsResult {
-            tools: OwlTools::tools(),
-            meta: None,
-            next_cursor: None,
-        })
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_prompts()
+                .enable_resources()
+                .enable_tools()
+                .build(),
+        )
+        .with_server_info(
+            Implementation::new("owl-mcp", env!("CARGO_PKG_VERSION"))
+                .with_title("OWL MCP Server")
+                .with_description(
+                    "High-performance MCP server for OWL ontology management, written in Rust.",
+                ),
+        )
+        .with_protocol_version(ProtocolVersion::V_2026_07_28)
+        .with_instructions(
+            "Use the OWL tools to load, query and modify OWL ontology files. \
+             Axioms are expressed in OWL Functional Syntax. \
+             resource://active lists ontology files currently cached in this process \
+             (not durable state)."
+                .to_string(),
+        )
     }
 
-    async fn handle_call_tool_request(
+    async fn list_resources(
         &self,
-        params: CallToolRequestParams,
-        _runtime: Arc<dyn McpServer>,
-    ) -> Result<CallToolResult, CallToolError> {
-        let tool = OwlTools::try_from(params).map_err(CallToolError::new)?;
-        let mgr = &self.manager;
-
-        match tool {
-            OwlTools::AddAxiom(p) => AddAxiom::run_tool(p, mgr).await,
-            OwlTools::AddAxioms(p) => AddAxioms::run_tool(p, mgr).await,
-            OwlTools::AddDataPropertyAssertion(p) => {
-                AddDataPropertyAssertion::run_tool(p, mgr).await
-            }
-            OwlTools::AddAnnotationAssertion(p) => AddAnnotationAssertion::run_tool(p, mgr).await,
-            OwlTools::AddObjectPropertyAssertion(p) => {
-                AddObjectPropertyAssertion::run_tool(p, mgr).await
-            }
-            OwlTools::AddClassAssertion(p) => AddClassAssertion::run_tool(p, mgr).await,
-            OwlTools::RemoveAxiom(p) => RemoveAxiom::run_tool(p, mgr).await,
-            OwlTools::FindAxioms(p) => FindAxioms::run_tool(p, mgr).await,
-            OwlTools::GetAllAxioms(p) => GetAllAxioms::run_tool(p, mgr).await,
-            OwlTools::AddPrefix(p) => AddPrefix::run_tool(p, mgr).await,
-            OwlTools::OntologyMetadata(p) => OntologyMetadata::run_tool(p, mgr).await,
-            OwlTools::GetLabelsForIri(p) => GetLabelsForIri::run_tool(p, mgr).await,
-            OwlTools::SetOntologyIri(p) => SetOntologyIri::run_tool(p, mgr).await,
-            OwlTools::TestQuality(p) => TestQuality::run_tool(p, mgr).await,
-            OwlTools::TestPitfalls(p) => TestPitfalls::run_tool(p, mgr).await,
-            OwlTools::SparqlQuery(p) => SparqlQuery::run_tool(p, mgr).await,
-            OwlTools::CheckConsistency(p) => CheckConsistency::run_tool(p, mgr).await,
-        }
-    }
-
-    async fn handle_list_resources_request(
-        &self,
-        _params: Option<PaginatedRequestParams>,
-        _runtime: Arc<dyn McpServer>,
-    ) -> Result<ListResourcesResult, RpcError> {
+        _request: Option<PaginatedRequestParams>,
+        _ctx: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
         Ok(ListResourcesResult {
-            resources: vec![Resource {
-                uri: "resource://active".to_string(),
-                name: "active".to_string(),
-                description: Some("List of currently loaded ontology file paths".to_string()),
-                mime_type: Some("application/json".to_string()),
-                annotations: None,
-                meta: None,
-                size: None,
-                title: None,
-                icons: vec![],
-            }],
-            meta: None,
-            next_cursor: None,
+            resources: vec![Resource::new(
+                "resource://active",
+                "active".to_string(),
+            )
+            .with_description(
+                "List of ontology file paths currently cached in this process (not durable state)"
+                    .to_string(),
+            )
+            .with_mime_type("application/json".to_string())],
+            ..Default::default()
         })
     }
 
-    async fn handle_read_resource_request(
+    async fn read_resource(
         &self,
-        params: ReadResourceRequestParams,
-        _runtime: Arc<dyn McpServer>,
-    ) -> Result<ReadResourceResult, RpcError> {
-        let uri = &params.uri;
-        let mgr = self.manager.lock().await;
+        request: ReadResourceRequestParams,
+        _ctx: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        let uri = &request.uri;
+        if uri != "resource://active" {
+            return Err(McpError::invalid_params(
+                format!("Unknown resource URI: {uri}"),
+                None,
+            ));
+        }
 
-        let text = if uri == "resource://active" {
-            serde_json::to_string_pretty(&mgr.active_paths())
-                .unwrap_or_else(|e| format!("Error: {}", e))
-        } else {
-            return Err(
-                RpcError::invalid_params().with_message(format!("Unknown resource URI: {}", uri))
-            );
-        };
-
-        Ok(ReadResourceResult {
-            contents: vec![ReadResourceContent::TextResourceContents(
-                TextResourceContents {
-                    uri: uri.clone(),
-                    mime_type: Some("application/json".to_string()),
-                    text,
-                    meta: None,
-                },
-            )],
-            meta: None,
-        })
-    }
-
-    async fn handle_list_prompts_request(
-        &self,
-        _params: Option<PaginatedRequestParams>,
-        _runtime: Arc<dyn McpServer>,
-    ) -> Result<ListPromptsResult, RpcError> {
-        Ok(ListPromptsResult {
-            prompts: vec![
-                Prompt {
-                    name: "ask_for_axioms_about".to_string(),
-                    description: Some(
-                        "Generate a prompt asking what axioms include a given topic string"
-                            .to_string(),
-                    ),
-                    arguments: vec![PromptArgument {
-                        name: "topic".to_string(),
-                        description: Some("The topic to search axioms for".to_string()),
-                        required: Some(true),
-                        title: None,
-                    }],
-                    meta: None,
-                    title: None,
-                    icons: vec![],
-                },
-                Prompt {
-                    name: "add_subclass_of".to_string(),
-                    description: Some("Generate a prompt to add a subClassOf axiom".to_string()),
-                    arguments: vec![
-                        PromptArgument {
-                            name: "child".to_string(),
-                            description: Some("The subclass (child class)".to_string()),
-                            required: Some(true),
-                            title: None,
-                        },
-                        PromptArgument {
-                            name: "parent".to_string(),
-                            description: Some("The superclass (parent class)".to_string()),
-                            required: Some(true),
-                            title: None,
-                        },
-                    ],
-                    meta: None,
-                    title: None,
-                    icons: vec![],
-                },
-            ],
-            meta: None,
-            next_cursor: None,
-        })
-    }
-
-    async fn handle_get_prompt_request(
-        &self,
-        params: GetPromptRequestParams,
-        _runtime: Arc<dyn McpServer>,
-    ) -> Result<GetPromptResult, RpcError> {
-        let args = params.arguments.unwrap_or_default();
-
-        let message_text = match params.name.as_str() {
-            "ask_for_axioms_about" => {
-                let topic = args.get("topic").map(|s| s.as_str()).unwrap_or("?");
-                format!("What axioms include the string '{}'?", topic)
-            }
-            "add_subclass_of" => {
-                let child = args.get("child").map(|s| s.as_str()).unwrap_or("?");
-                let parent = args.get("parent").map(|s| s.as_str()).unwrap_or("?");
-                format!(
-                    "Add a subClassOf axiom where the subclass is '{}' and the superclass is '{}'",
-                    child, parent
-                )
-            }
-            _ => {
-                return Err(RpcError::invalid_params()
-                    .with_message(format!("Unknown prompt: {}", params.name)));
-            }
-        };
-
-        Ok(GetPromptResult {
-            description: None,
-            messages: vec![PromptMessage {
-                role: Role::User,
-                content: ContentBlock::TextContent(TextContent::from(message_text)),
-            }],
-            meta: None,
-        })
+        let paths = self.manager.active_paths().await;
+        let text = serde_json::to_string_pretty(&paths).unwrap_or_else(|e| format!("Error: {e}"));
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(text, uri.clone())]).into())
     }
 }

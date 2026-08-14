@@ -27,6 +27,8 @@ pub enum OwlApiError {
     Io(#[from] std::io::Error),
     #[error("OWL parse error: {0}")]
     Parse(String),
+    #[error("Verbalizer error: {0}")]
+    Verbalize(String),
     #[error("Ontology is read-only")]
     ReadOnly,
     #[error("Regex error: {0}")]
@@ -526,8 +528,12 @@ impl OwlApi {
             .collect()
     }
 
-    pub fn save(&self) -> Result<(), OwlApiError> {
-        write_ontology_with_format(&self.path, &self.ontology, &self.prefixes, self.format)
+    pub fn save(&mut self) -> Result<(), OwlApiError> {
+        write_ontology_with_format(&self.path, &self.ontology, &self.prefixes, self.format)?;
+        self.last_modified = std::fs::metadata(&self.path)
+            .and_then(|m| m.modified())
+            .ok();
+        Ok(())
     }
 
     /// Serialize the in-memory ontology to N-Triples bytes.
@@ -635,7 +641,7 @@ impl OwlApi {
         }
     }
 
-    fn expand_curie(&self, curie: &str) -> String {
+    pub fn expand_curie(&self, curie: &str) -> String {
         if curie.starts_with('<') && curie.ends_with('>') {
             return curie[1..curie.len() - 1].to_string();
         }

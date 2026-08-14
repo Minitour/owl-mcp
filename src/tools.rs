@@ -1,35 +1,34 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use rust_mcp_sdk::{
-    macros::{mcp_tool, JsonSchema},
-    schema::{schema_utils::CallToolError, CallToolResult, TextContent},
-    tool_box,
-};
-use tokio::sync::Mutex;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::ontology::manager::OntologyManager;
+use crate::ontology::owl_api::{OwlApi, OwlApiError};
 
-pub type Manager = Arc<Mutex<OntologyManager>>;
+pub type Manager = Arc<OntologyManager>;
 
-fn text_result(s: impl Into<String>) -> Result<CallToolResult, CallToolError> {
-    Ok(CallToolResult::text_content(vec![TextContent::from(
-        s.into(),
-    )]))
+fn text(s: impl Into<String>) -> Vec<String> {
+    vec![s.into()]
 }
 
-fn list_result(items: Vec<String>) -> Result<CallToolResult, CallToolError> {
-    let content: Vec<TextContent> = items.into_iter().map(TextContent::from).collect();
-    Ok(CallToolResult::text_content(content))
+async fn with_api<R>(
+    manager: &Manager,
+    path: &str,
+    readonly: bool,
+    create: bool,
+    f: impl FnOnce(&mut OwlApi) -> Result<R, OwlApiError>,
+) -> Result<R, OwlApiError> {
+    let handle = manager.get_or_load(path, readonly, create).await?;
+    let mut api = handle.lock().await;
+    f(&mut api)
 }
 
 // ── Axiom operations ──────────────────────────────────────────────────────────
 
-#[mcp_tool(
-    name = "add_axiom",
-    description = "Add a single OWL axiom in functional syntax to the ontology file. E.g. SubClassOf(:Dog :Animal)"
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add a single OWL axiom in functional syntax to the ontology file. E.g. SubClassOf(:Dog :Animal)
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddAxiom {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -38,26 +37,16 @@ pub struct AddAxiom {
 }
 
 impl AddAxiom {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_axiom(&params.axiom_str)
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_axiom(&params.axiom_str).map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "add_axioms",
-    description = "Add multiple OWL axioms in functional syntax to the ontology file. Stops on the first failure."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add multiple OWL axioms in functional syntax to the ontology file. Stops on the first failure.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddAxioms {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -66,31 +55,19 @@ pub struct AddAxioms {
 }
 
 impl AddAxioms {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_axioms(&params.axiom_strs)
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_axioms(&params.axiom_strs).map(text)
+        })
+        .await
     }
 }
 
-// ── Structured assertions (escaping-free for long literals) ───────────────────
-
-#[mcp_tool(
-    name = "add_data_property_assertion",
-    description = "Add a data property assertion (DataPropertyAssertion) where the literal VALUE is \
-    supplied as a separate field. Use this instead of add_axiom for long or special-character \
-    values (containing ; = / , quotes or newlines): the server constructs the axiom directly, so \
-    no escaping or shell-quoting is needed. property/subject accept an IRI, CURIE, or <full-iri>."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add a data property assertion (DataPropertyAssertion) where the literal VALUE is
+/// supplied as a separate field. Use this instead of add_axiom for long or special-character
+/// values (containing ; = / , quotes or newlines): the server constructs the axiom directly, so
+/// no escaping or shell-quoting is needed. property/subject accept an IRI, CURIE, or <full-iri>.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddDataPropertyAssertion {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -107,35 +84,26 @@ pub struct AddDataPropertyAssertion {
 }
 
 impl AddDataPropertyAssertion {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_data_property_assertion(
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_data_property_assertion(
                 &params.property,
                 &params.subject,
                 &params.value,
                 params.datatype.as_deref(),
                 params.lang.as_deref(),
             )
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+            .map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "add_annotation_assertion",
-    description = "Add an annotation assertion (AnnotationAssertion) where the literal VALUE is \
-    supplied as a separate field. Use this instead of add_axiom for long or special-character \
-    values (containing ; = / , quotes or newlines): the server constructs the axiom directly, so \
-    no escaping or shell-quoting is needed. property/subject accept an IRI, CURIE, or <full-iri>."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add an annotation assertion (AnnotationAssertion) where the literal VALUE is
+/// supplied as a separate field. Use this instead of add_axiom for long or special-character
+/// values (containing ; = / , quotes or newlines): the server constructs the axiom directly, so
+/// no escaping or shell-quoting is needed. property/subject accept an IRI, CURIE, or <full-iri>.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddAnnotationAssertion {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -152,34 +120,25 @@ pub struct AddAnnotationAssertion {
 }
 
 impl AddAnnotationAssertion {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_annotation_assertion(
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_annotation_assertion(
                 &params.property,
                 &params.subject,
                 &params.value,
                 params.datatype.as_deref(),
                 params.lang.as_deref(),
             )
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+            .map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "add_object_property_assertion",
-    description = "Add an object property assertion (ObjectPropertyAssertion) linking a subject \
-    individual to a target individual via an object property. property/subject/target accept an \
-    IRI, CURIE, or <full-iri>."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add an object property assertion (ObjectPropertyAssertion) linking a subject
+/// individual to a target individual via an object property. property/subject/target accept an
+/// IRI, CURIE, or <full-iri>.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddObjectPropertyAssertion {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -192,27 +151,18 @@ pub struct AddObjectPropertyAssertion {
 }
 
 impl AddObjectPropertyAssertion {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_object_property_assertion(&params.property, &params.subject, &params.target)
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_object_property_assertion(&params.property, &params.subject, &params.target)
+                .map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "add_class_assertion",
-    description = "Add a class assertion (ClassAssertion) stating that an individual is an instance \
-    of a class. class/individual accept an IRI, CURIE, or <full-iri>."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add a class assertion (ClassAssertion) stating that an individual is an instance
+/// of a class. class/individual accept an IRI, CURIE, or <full-iri>.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddClassAssertion {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -223,26 +173,17 @@ pub struct AddClassAssertion {
 }
 
 impl AddClassAssertion {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_class_assertion(&params.class, &params.individual)
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_class_assertion(&params.class, &params.individual)
+                .map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "remove_axiom",
-    description = "Remove a single OWL axiom (given in functional syntax) from the ontology file."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Remove a single OWL axiom (given in functional syntax) from the ontology file.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct RemoveAxiom {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -251,26 +192,16 @@ pub struct RemoveAxiom {
 }
 
 impl RemoveAxiom {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .remove_axiom(&params.axiom_str)
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            api.remove_axiom(&params.axiom_str).map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "find_axioms",
-    description = "Search axioms in an OWL file using a regex pattern. Returns matching axioms (up to limit)."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Search axioms in an OWL file using a regex pattern. Returns matching axioms (up to limit).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct FindAxioms {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -287,31 +218,21 @@ pub struct FindAxioms {
 }
 
 impl FindAxioms {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
-        let results = api
-            .find_axioms(
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            api.find_axioms(
                 &params.pattern,
                 params.limit as usize,
                 params.include_labels,
                 params.annotation_property.as_deref(),
             )
-            .map_err(CallToolError::new)?;
-        list_result(results)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "get_all_axioms",
-    description = "Return all axioms in the OWL file (up to limit)."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Return all axioms in the OWL file (up to limit).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct GetAllAxioms {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -326,30 +247,22 @@ pub struct GetAllAxioms {
 }
 
 impl GetAllAxioms {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
-        let results = api.get_all_axioms(
-            params.limit as usize,
-            params.include_labels,
-            params.annotation_property.as_deref(),
-        );
-        list_result(results)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            Ok(api.get_all_axioms(
+                params.limit as usize,
+                params.include_labels,
+                params.annotation_property.as_deref(),
+            ))
+        })
+        .await
     }
 }
 
 // ── Metadata operations ───────────────────────────────────────────────────────
 
-#[mcp_tool(
-    name = "add_prefix",
-    description = "Add a prefix mapping (e.g. prefix='ex:' uri='http://example.org/') to the ontology file."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Add a prefix mapping (e.g. prefix='ex:' uri='http://example.org/') to the ontology file.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddPrefix {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -360,50 +273,32 @@ pub struct AddPrefix {
 }
 
 impl AddPrefix {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .add_prefix(&params.prefix, &params.uri)
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.add_prefix(&params.prefix, &params.uri).map(text)
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "ontology_metadata",
-    description = "Return the ontology-level annotation axioms (metadata header) for the given OWL file."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Return the ontology-level annotation axioms (metadata header) for the given OWL file.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct OntologyMetadata {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
 }
 
 impl OntologyMetadata {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
-        let results = api.ontology_metadata();
-        list_result(results)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            Ok(api.ontology_metadata())
+        })
+        .await
     }
 }
 
-#[mcp_tool(
-    name = "get_labels_for_iri",
-    description = "Return all label values for a given IRI or CURIE in the ontology file. Defaults to rdfs:label."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Return all label values for a given IRI or CURIE in the ontology file. Defaults to rdfs:label.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct GetLabelsForIri {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -414,27 +309,17 @@ pub struct GetLabelsForIri {
 }
 
 impl GetLabelsForIri {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
-        let results = api.get_labels_for_iri(&params.iri, params.annotation_property.as_deref());
-        list_result(results)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            Ok(api.get_labels_for_iri(&params.iri, params.annotation_property.as_deref()))
+        })
+        .await
     }
 }
 
-// ── Ontology IRI ───────────────────────────────────────────────────────────
-
-#[mcp_tool(
-    name = "set_ontology_iri",
-    description = "Set or update the ontology IRI (and optional version IRI) for an OWL file. \
-    Pass iri=null to clear the ontology IRI."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Set or update the ontology IRI (and optional version IRI) for an OWL file.
+/// Pass iri=null to clear the ontology IRI.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SetOntologyIri {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -445,71 +330,48 @@ pub struct SetOntologyIri {
 }
 
 impl SetOntologyIri {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, true)
-            .map_err(CallToolError::new)?;
-        let msg = api
-            .set_ontology_iri(params.iri.as_deref(), params.version_iri.as_deref())
-            .map_err(CallToolError::new)?;
-        text_result(msg)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, true, |api| {
+            api.set_ontology_iri(params.iri.as_deref(), params.version_iri.as_deref())
+                .map(text)
+        })
+        .await
     }
 }
 
-// ── Quality evaluation ─────────────────────────────────────────────────────────
-
-#[mcp_tool(
-    name = "test_quality",
-    description = "Evaluate the quality of an OWL ontology using the OQuaRE framework (based on ISO/IEC 25000 SQuaRE). \
-    Uses the whelk OWL EL reasoner for inferred class hierarchy. \
-    Returns a JSON report with: basic metrics (class/property counts, hierarchy stats), \
-    19 raw + scaled metrics (ANOnto, AROnto, CBOOnto, CROnto, DITOnto, INROnto, LCOMOnto, \
-    NACOnto, NOCOnto, NOMOnto, RFCOnto, RROnto, TMOnto, WMCOnto, plus variants), \
-    22 subcharacteristics, 7 quality characteristics (Structural, Functional Adequacy, \
-    Maintainability, Operability, Reliability, Transferability, Compatibility), \
-    and an overall OQuaRE score (1-5 scale, where 1=not acceptable, 3=minimally acceptable, 5=exceeds requirements)."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Evaluate the quality of an OWL ontology using the OQuaRE framework (based on ISO/IEC 25000 SQuaRE).
+/// Uses the whelk OWL EL reasoner for inferred class hierarchy.
+/// Returns a JSON report with: basic metrics (class/property counts, hierarchy stats),
+/// 19 raw + scaled metrics (ANOnto, AROnto, CBOOnto, CROnto, DITOnto, INROnto, LCOMOnto,
+/// NACOnto, NOCOnto, NOMOnto, RFCOnto, RROnto, TMOnto, WMCOnto, plus variants),
+/// 22 subcharacteristics, 7 quality characteristics (Structural, Functional Adequacy,
+/// Maintainability, Operability, Reliability, Transferability, Compatibility),
+/// and an overall OQuaRE score (1-5 scale, where 1=not acceptable, 3=minimally acceptable, 5=exceeds requirements).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct TestQuality {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
 }
 
 impl TestQuality {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
-
-        let report = crate::quality::evaluate(&api.ontology);
-        let json = serde_json::to_string_pretty(&report).map_err(|e| {
-            CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(e.to_string()))
-        })?;
-
-        text_result(json)
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            let report = crate::quality::evaluate(&api.ontology);
+            let json = serde_json::to_string_pretty(&report)
+                .map_err(|e| OwlApiError::Parse(e.to_string()))?;
+            Ok(text(json))
+        })
+        .await
     }
 }
 
-// ── SPARQL query ───────────────────────────────────────────────────────────────
-
-#[mcp_tool(
-    name = "sparql_query",
-    description = "Run a SPARQL query over one or more OWL files. Each file is serialized to RDF and \
-    loaded together into an in-memory store (pass several paths to merge a schema with its ABox or \
-    imports before querying), then the query is evaluated against the merged graph. \
-    Returns SPARQL 1.1 JSON results for SELECT/ASK, and a list of N-Triples for CONSTRUCT/DESCRIBE. \
-    By default queries run over asserted triples only. Set with_reasoning=true to materialize \
-    OWL 2 EL entailments (via whelk) before querying so inferred subclass relationships are visible."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Run a SPARQL query over one or more OWL files. Each file is serialized to RDF and
+/// loaded together into an in-memory store (pass several paths to merge a schema with its ABox or
+/// imports before querying), then the query is evaluated against the merged graph.
+/// Returns SPARQL 1.1 JSON results for SELECT/ASK, and a list of N-Triples for CONSTRUCT/DESCRIBE.
+/// By default queries run over asserted triples only. Set with_reasoning=true to materialize
+/// OWL 2 EL entailments (via whelk) before querying so inferred subclass relationships are visible.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SparqlQuery {
     /// Absolute paths to the OWL files to load and merge into one RDF graph before querying
     pub owl_file_paths: Vec<String>,
@@ -522,67 +384,49 @@ pub struct SparqlQuery {
 }
 
 impl SparqlQuery {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
         if params.owl_file_paths.is_empty() {
-            return Err(CallToolError::new(
-                crate::ontology::owl_api::OwlApiError::Parse(
-                    "owl_file_paths must contain at least one path".to_string(),
-                ),
+            return Err(OwlApiError::Parse(
+                "owl_file_paths must contain at least one path".to_string(),
             ));
         }
-
-        let mut mgr = manager.lock().await;
 
         let json = if params.with_reasoning {
             let mut ontologies = Vec::with_capacity(params.owl_file_paths.len());
             for path in &params.owl_file_paths {
-                let api = mgr
-                    .get_or_load(path, false, false)
-                    .map_err(CallToolError::new)?;
+                let handle = manager.get_or_load(path, false, false).await?;
+                let api = handle.lock().await;
                 ontologies.push(api.ontology.clone());
             }
-            drop(mgr);
 
             let refs: Vec<_> = ontologies.iter().collect();
             let merged = crate::reasoning::merge_ontologies(&refs);
             let reasoned = crate::reasoning::reason_and_materialize(&merged);
-            let bytes = crate::ontology::owl_api::ontology_to_rdf_bytes(&reasoned)
-                .map_err(CallToolError::new)?;
-            crate::sparql::query(&[bytes], &params.query).map_err(CallToolError::new)?
+            let bytes = crate::ontology::owl_api::ontology_to_rdf_bytes(&reasoned)?;
+            crate::sparql::query(&[bytes], &params.query)?
         } else {
             let mut rdf_docs: Vec<Vec<u8>> = Vec::with_capacity(params.owl_file_paths.len());
             for path in &params.owl_file_paths {
-                let api = mgr
-                    .get_or_load(path, false, false)
-                    .map_err(CallToolError::new)?;
-                let bytes = api.to_rdf_bytes().map_err(CallToolError::new)?;
-                rdf_docs.push(bytes);
+                let handle = manager.get_or_load(path, false, false).await?;
+                let api = handle.lock().await;
+                rdf_docs.push(api.to_rdf_bytes()?);
             }
-            drop(mgr);
-            crate::sparql::query(&rdf_docs, &params.query).map_err(CallToolError::new)?
+            crate::sparql::query(&rdf_docs, &params.query)?
         };
 
-        text_result(json)
+        Ok(text(json))
     }
 }
 
-// ── Consistency / reasoning ────────────────────────────────────────────────────
-
-#[mcp_tool(
-    name = "check_consistency",
-    description = "Run an OWL 2 EL reasoner (whelk; alias elk) over one or more OWL files and report \
-    logical consistency. Multiple paths are loaded and merged (same semantics as sparql_query), so a \
-    schema + ABox can be reasoned together. Returns JSON with: consistent (bool), \
-    unsatisfiable_classes (IRIs equivalent to owl:Nothing), optional inferred_axioms_count, and \
-    reasoner. Optionally write a materialized ontology (asserted + inferred SubClassOf axioms) to \
-    output_path. IMPORTANT: reasoning is limited to the OWL 2 EL profile — full OWL 2 DL \
-    inconsistency (cardinality restrictions, complex disjointness outside EL, etc.) is NOT detected. \
-    This matches robot reason --reasoner ELK."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Run an OWL 2 EL reasoner (whelk; alias elk) over one or more OWL files and report
+/// logical consistency. Multiple paths are loaded and merged (same semantics as sparql_query), so a
+/// schema + ABox can be reasoned together. Returns JSON with: consistent (bool),
+/// unsatisfiable_classes (IRIs equivalent to owl:Nothing), optional inferred_axioms_count, and
+/// reasoner. Optionally write a materialized ontology (asserted + inferred SubClassOf axioms) to
+/// output_path. IMPORTANT: reasoning is limited to the OWL 2 EL profile — full OWL 2 DL
+/// inconsistency (cardinality restrictions, complex disjointness outside EL, etc.) is NOT detected.
+/// This matches robot reason --reasoner ELK.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CheckConsistency {
     /// Absolute paths to the OWL files to load and merge before reasoning
     pub owl_file_paths: Vec<String>,
@@ -593,34 +437,26 @@ pub struct CheckConsistency {
 }
 
 impl CheckConsistency {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
         if params.owl_file_paths.is_empty() {
-            return Err(CallToolError::new(
-                crate::ontology::owl_api::OwlApiError::Parse(
-                    "owl_file_paths must contain at least one path".to_string(),
-                ),
+            return Err(OwlApiError::Parse(
+                "owl_file_paths must contain at least one path".to_string(),
             ));
         }
 
         crate::reasoning::normalize_reasoner_id(params.reasoner.as_deref())
-            .map_err(|msg| CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(msg)))?;
+            .map_err(OwlApiError::Parse)?;
 
-        let mut mgr = manager.lock().await;
         let mut ontologies = Vec::with_capacity(params.owl_file_paths.len());
         let mut prefixes = horned_owl::curie::PrefixMapping::default();
         for (i, path) in params.owl_file_paths.iter().enumerate() {
-            let api = mgr
-                .get_or_load(path, false, false)
-                .map_err(CallToolError::new)?;
+            let handle = manager.get_or_load(path, false, false).await?;
+            let api = handle.lock().await;
             if i == 0 {
                 prefixes = api.prefixes.clone();
             }
             ontologies.push(api.ontology.clone());
         }
-        drop(mgr);
 
         let refs: Vec<_> = ontologies.iter().collect();
         let merged = crate::reasoning::merge_ontologies(&refs);
@@ -631,39 +467,32 @@ impl CheckConsistency {
                 &prefixes,
                 Some(std::path::Path::new(out)),
                 true,
-            )
-            .map_err(CallToolError::new)?;
+            )?;
             report
         } else {
             crate::reasoning::check(&merged, false)
         };
 
-        let json = serde_json::to_string_pretty(&report).map_err(|e| {
-            CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(e.to_string()))
-        })?;
-        text_result(json)
+        let json =
+            serde_json::to_string_pretty(&report).map_err(|e| OwlApiError::Parse(e.to_string()))?;
+        Ok(text(json))
     }
 }
 
-// ── Pitfall scanner ────────────────────────────────────────────────────────────
-
-#[mcp_tool(
-    name = "test_pitfalls",
-    description = "Scan an OWL ontology for common modeling pitfalls (inspired by OOPS! - OntOlogy Pitfall Scanner). \
-    Returns a JSON report listing detected issues, their severity, and affected elements. \
-    31 checks: P02 (synonym classes), P03 (\"is\" relationship), P04 (unconnected elements), \
-    P05 (wrong inverses), P06 (class hierarchy cycles), P07 (merged concepts), \
-    P08 (missing annotations), P10 (missing disjointness), P11 (missing domain/range), \
-    P12 (undeclared equivalent properties), P13 (missing inverses, with sub-variants Y/N/S), \
-    P19 (multiple domains/ranges), P20 (misused annotations), P21 (miscellaneous class), \
-    P22 (inconsistent naming), P24 (recursive definitions), P25 (self-inverse), \
-    P26 (inverse of symmetric), P27 (wrong equivalent properties), P28 (wrong symmetric), \
-    P29 (wrong transitive), P30 (undeclared equivalent classes), P31 (wrong equivalent classes), \
-    P32 (duplicate labels), P33 (single-property chain), P34 (untyped class), \
-    P35 (untyped property), P36 (URI file extension), P38 (no ontology declaration), \
-    P39 (ambiguous namespace), P41 (no license)."
-)]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, JsonSchema)]
+/// Scan an OWL ontology for common modeling pitfalls (inspired by OOPS! - OntOlogy Pitfall Scanner).
+/// Returns a JSON report listing detected issues, their severity, and affected elements.
+/// 31 checks: P02 (synonym classes), P03 ("is" relationship), P04 (unconnected elements),
+/// P05 (wrong inverses), P06 (class hierarchy cycles), P07 (merged concepts),
+/// P08 (missing annotations), P10 (missing disjointness), P11 (missing domain/range),
+/// P12 (undeclared equivalent properties), P13 (missing inverses, with sub-variants Y/N/S),
+/// P19 (multiple domains/ranges), P20 (misused annotations), P21 (miscellaneous class),
+/// P22 (inconsistent naming), P24 (recursive definitions), P25 (self-inverse),
+/// P26 (inverse of symmetric), P27 (wrong equivalent properties), P28 (wrong symmetric),
+/// P29 (wrong transitive), P30 (undeclared equivalent classes), P31 (wrong equivalent classes),
+/// P32 (duplicate labels), P33 (single-property chain), P34 (untyped class),
+/// P35 (untyped property), P36 (URI file extension), P38 (no ontology declaration),
+/// P39 (ambiguous namespace), P41 (no license).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct TestPitfalls {
     /// Absolute path to the OWL file
     pub owl_file_path: String,
@@ -672,55 +501,54 @@ pub struct TestPitfalls {
 }
 
 impl TestPitfalls {
-    pub async fn run_tool(
-        params: Self,
-        manager: &Manager,
-    ) -> Result<CallToolResult, CallToolError> {
-        let mut mgr = manager.lock().await;
-        let api = mgr
-            .get_or_load(&params.owl_file_path, false, false)
-            .map_err(CallToolError::new)?;
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        with_api(manager, &params.owl_file_path, false, false, |api| {
+            let filter = params.pitfalls.as_ref().map(|s| {
+                s.split(',')
+                    .map(|p| p.trim().to_uppercase())
+                    .collect::<HashSet<_>>()
+            });
 
-        let filter = params.pitfalls.as_ref().map(|s| {
-            s.split(',')
-                .map(|p| p.trim().to_uppercase())
-                .collect::<HashSet<_>>()
-        });
-
-        let report = crate::pitfalls::scan(&api.ontology, filter.as_ref());
-        let json = serde_json::to_string_pretty(&report).map_err(|e| {
-            CallToolError::new(crate::ontology::owl_api::OwlApiError::Parse(e.to_string()))
-        })?;
-
-        text_result(json)
+            let report = crate::pitfalls::scan(&api.ontology, filter.as_ref());
+            let json = serde_json::to_string_pretty(&report)
+                .map_err(|e| OwlApiError::Parse(e.to_string()))?;
+            Ok(text(json))
+        })
+        .await
     }
 }
 
-// ── Tool box (enum + dispatch) ─────────────────────────────────────────────────
-
-fn default_limit() -> u64 {
+pub fn default_limit() -> u64 {
     100
 }
 
-tool_box!(
-    OwlTools,
-    [
-        AddAxiom,
-        AddAxioms,
-        AddDataPropertyAssertion,
-        AddAnnotationAssertion,
-        AddObjectPropertyAssertion,
-        AddClassAssertion,
-        RemoveAxiom,
-        FindAxioms,
-        GetAllAxioms,
-        AddPrefix,
-        OntologyMetadata,
-        GetLabelsForIri,
-        SetOntologyIri,
-        TestQuality,
-        TestPitfalls,
-        SparqlQuery,
-        CheckConsistency,
-    ]
-);
+/// Convert OWL axioms into Controlled Natural Language (pseudo-text) plus a Turtle fragment.
+/// If `iri` is omitted, verbalizes owl:Class and owl:NamedIndividual entities (up to limit).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct Verbalize {
+    /// Absolute path to the OWL file
+    pub owl_file_path: String,
+    /// Optional IRI or CURIE of a single class or individual to verbalize
+    pub iri: Option<String>,
+    /// Maximum number of entities to verbalize when `iri` is omitted (default: 100)
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+}
+
+impl Verbalize {
+    pub async fn run(params: Self, manager: &Manager) -> Result<Vec<String>, OwlApiError> {
+        let handle = manager
+            .get_or_load(&params.owl_file_path, false, false)
+            .await?;
+        let api = handle.lock().await;
+        let rdf = api.to_rdf_bytes()?;
+        let starting = params.iri.as_ref().map(|iri| vec![api.expand_curie(iri)]);
+        drop(api);
+
+        let entries =
+            crate::verbalizer::verbalize(&rdf, starting.as_deref(), params.limit as usize)?;
+        let json = serde_json::to_string_pretty(&entries)
+            .map_err(|e| OwlApiError::Parse(e.to_string()))?;
+        Ok(text(json))
+    }
+}

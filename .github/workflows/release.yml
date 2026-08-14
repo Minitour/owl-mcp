@@ -12,6 +12,7 @@ env:
 
 permissions:
   contents: write   # needed to create GitHub Releases
+  id-token: write   # required for npm Trusted Publisher (OIDC)
 
 jobs:
   # ── 1. Build native binaries ────────────────────────────────────────────────
@@ -111,7 +112,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       # Strip the leading 'v' from the tag to get a semver version string
@@ -128,15 +129,10 @@ jobs:
       - name: Publish platform npm packages
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           set -euo pipefail
-
-          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "::error::NPM_TOKEN secret is not set. Add it in Settings → Secrets → Actions."
-            exit 1
-          fi
+          unset NODE_AUTH_TOKEN || true
 
           echo "Publishing version: ${VERSION}"
           echo "Artifact structure:"
@@ -167,7 +163,11 @@ jobs:
             "os": ["${OS}"],
             "cpu": ["${CPU}"],
             "license": "MIT",
-            "files": ["bin"]
+            "files": ["bin"],
+            "repository": {
+              "type": "git",
+              "url": "https://github.com/Minitour/owl-mcp.git"
+            }
           }
           PKGJSON
 
@@ -192,10 +192,10 @@ jobs:
       - name: Update main package version and publish
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           set -euo pipefail
+          unset NODE_AUTH_TOKEN || true
           cd npm
           # Single source of truth: copy repo README for npm package page
           cp ../README.md README.md

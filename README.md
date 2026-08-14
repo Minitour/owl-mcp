@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/owl-mcp.svg)](https://www.npmjs.com/package/owl-mcp)
 [![CI](https://github.com/Minitour/owl-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Minitour/owl-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
 
 A high-performance [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server **and CLI** for OWL ontology management, written in Rust.
@@ -12,10 +12,11 @@ Built as a drop-in replacement for [ai4curation/owl-mcp](https://github.com/ai4c
 
 ## Features
 
-- **17 MCP tools** — add, remove, search, and inspect axioms; add structured assertions (data/annotation/object property, class) with the literal value as a separate field; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality; check logical consistency with an OWL 2 EL reasoner; run SPARQL queries
+- **18 MCP tools** — add, remove, search, and inspect axioms; add structured assertions (data/annotation/object property, class) with the literal value as a separate field; manage prefixes, labels, and ontology IRIs; scan for modeling pitfalls; evaluate ontology quality; check logical consistency with an OWL 2 EL reasoner; run SPARQL queries; verbalize OWL into Controlled Natural Language
 - **CLI mode** — every tool is also available as a direct CLI subcommand (`owl-mcp find-axioms ...`)
-- **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP + SSE)
-- **Live file watching** — automatically reloads ontology files modified externally
+- **2 transport modes** — `stdio` (default, for Cursor/Claude Desktop) and `http` (Streamable HTTP, MCP 2026-07-28, sessionless)
+- **Disk as source of truth** — each tool call takes `owl_file_path`; the in-memory cache reloads when the file's mtime changes. `resource://active` lists files currently cached in this process (not durable state)
+- **Live file watching** — a 5s watcher is a local optimization; mtime-on-access is what keeps the cache correct
 - **OFN and RDF/XML support** — reads and writes both formats; format is auto-detected from file extension and content
 - **Never crashes** — errors are returned as MCP tool failures, not panics
 
@@ -36,7 +37,7 @@ owl-mcp --help
 
 ### Build from source
 
-Requires [Rust](https://rustup.rs) 1.75+.
+Requires [Rust](https://rustup.rs) 1.88+.
 
 ```bash
 git clone https://github.com/Minitour/owl-mcp
@@ -58,7 +59,7 @@ Options:
   --transport <stdio|http>   Transport to use [default: stdio]
   --host <HOST>              Host to bind (HTTP only) [default: 127.0.0.1]
   --port <PORT>              Port to bind (HTTP only) [default: 8080]
-  --sse-support              Enable legacy SSE endpoint [default: true]
+  --sse-support              Enable legacy SSE endpoint [unused; HTTP is Streamable HTTP JSON only]
 ```
 
 ### CLI mode
@@ -77,6 +78,8 @@ owl-mcp sparql --file ontology.owl --query "SELECT ?c WHERE { ?c a owl:Class }"
 owl-mcp sparql --file schema.owl --file data.owl --query "ASK { ?i a :Plan }"
 owl-mcp reason --file ontology.owl
 owl-mcp reason --file schema.owl --file data.owl --output reasoned.ofn
+owl-mcp verbalize --file ontology.owl
+owl-mcp verbalize --file ontology.owl --iri http://example.org/pizza#Margherita --limit 10
 ```
 
 Run `owl-mcp --help` for a full list of commands, or `owl-mcp <command> --help` for details on a specific command.
@@ -118,7 +121,7 @@ owl-mcp serve --transport http --port 8080
 
 ## Tools
 
-All tools operate on OWL files by absolute path. The manager lazily loads files on first access and caches them for subsequent calls.
+All tools operate on OWL files by absolute path. The manager lazily loads files on first access and caches them in this process. Each access reloads from disk if the file's modification time has changed, so the cache is not protocol or session state.
 
 ### Axiom operations
 
@@ -166,6 +169,16 @@ For long or special-character literal values (containing `;`, `=`, `/`, `,`, quo
 `sparql_query` takes `owl_file_paths` (one or more absolute paths) and a `query` string. Each file is serialized to RDF and loaded together into an in-memory [oxigraph](https://github.com/oxigraph/oxigraph) store, so passing several paths merges a schema with its ABox or imports before the query runs. `SELECT` and `ASK` return the standard [SPARQL 1.1 JSON results](https://www.w3.org/TR/sparql11-results-json/) format; `CONSTRUCT` and `DESCRIBE` return a list of N-Triples. By default queries run over asserted triples only. Set `with_reasoning: true` to materialize OWL 2 EL entailments (via [whelk](https://github.com/INCATools/whelk-rs)) before querying so inferred subclass relationships are visible.
 
 `check_consistency` (CLI: `owl-mcp reason`) takes `owl_file_paths` (merged like `sparql_query`), an optional `reasoner` (`whelk` default; `elk` is accepted as a synonym), and an optional `output_path` to write a materialized ontology (asserted + inferred `SubClassOf` axioms). It returns JSON with `consistent`, `unsatisfiable_classes`, optional `inferred_axioms_count`, and `reasoner`. **Profile limitation:** whelk/ELK reason within **OWL 2 EL** only — full OWL 2 DL inconsistency (cardinality restrictions, complex disjointness outside EL, etc.) is **not** detected. This is a faithful replacement for `robot reason --reasoner ELK`, not a DL-complete reasoner.
+
+### Verbalization
+
+| Tool | Description |
+|---|---|
+| `verbalize` | Convert OWL axioms into Controlled Natural Language (pseudo-text) plus a Turtle fragment |
+
+`verbalize` (CLI: `owl-mcp verbalize --file ontology.owl [--iri ...] [--limit N]`) takes `owl_file_path`, an optional `iri` (CURIE or full IRI), and an optional `limit` (default 100). If `iri` is omitted, it verbalizes `owl:Class` and `owl:NamedIndividual` entities, skipping `owl:deprecated`. The result is a JSON array of `{root, fragment, text, statements, unique_concepts, unique_relationships}`. CNL uses the same default ignore/rephrase maps as [ontology-verbalizer](https://github.com/Minitour/ontology-verbalizer) (`rdfs:subClassOf` → "is a type of", `owl:disjointWith` → "is different from", `owl:unionOf` → "any of", etc.). There is no LLM paraphrasing.
+
+The MCP HTTP transport is Streamable HTTP at `/mcp` (protocol `2026-07-28`, no `Mcp-Session-Id`). stdio remains compatible with the 2025-11-25 handshake used by Cursor and Claude Desktop.
 
 ## Development
 

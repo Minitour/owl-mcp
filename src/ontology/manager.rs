@@ -1,51 +1,86 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
 
 use super::owl_api::{OwlApi, OwlApiError};
 
-/// Thread-safe manager holding one `OwlApi` per file path.
-/// This struct itself is wrapped in `Arc<Mutex<OntologyManager>>` by the handler.
+/// Cache of loaded ontologies, keyed by canonical absolute path.
+///
+/// Disk is the source of truth: [`get_or_load`] reloads from mtime on each access.
+/// Each file has its own mutex so unrelated paths are not serialized.
 pub struct OntologyManager {
-    /// Map from canonical absolute path → loaded ontology
-    pub apis: HashMap<PathBuf, OwlApi>,
+    apis: Mutex<HashMap<PathBuf, Arc<Mutex<OwlApi>>>>,
 }
 
 impl OntologyManager {
     pub fn new() -> Self {
         OntologyManager {
-            apis: HashMap::new(),
+            apis: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Get or load an ontology by file path.
-    pub fn get_or_load(
-        &mut self,
+    /// Get or load an ontology by file path, reloading from disk if mtime changed.
+    pub async fn get_or_load(
+        &self,
         path: impl AsRef<Path>,
         readonly: bool,
         create_if_not_exists: bool,
-    ) -> Result<&mut OwlApi, OwlApiError> {
+    ) -> Result<Arc<Mutex<OwlApi>>, OwlApiError> {
         let path = canonicalize_or_absolute(path.as_ref());
-        if !self.apis.contains_key(&path) {
-            let api = OwlApi::load(&path, readonly, create_if_not_exists)?;
-            self.apis.insert(path.clone(), api);
+
+        {
+            let map = self.apis.lock().await;
+            if let Some(handle) = map.get(&path).cloned() {
+                drop(map);
+                {
+                    let mut api = handle.lock().await;
+                    api.check_and_reload_if_modified()?;
+                }
+                return Ok(handle);
+            }
         }
-        Ok(self.apis.get_mut(&path).unwrap())
+
+        let api = OwlApi::load(&path, readonly, create_if_not_exists)?;
+        let loaded = Arc::new(Mutex::new(api));
+
+        let mut map = self.apis.lock().await;
+        let handle = map.entry(path).or_insert_with(|| loaded.clone()).clone();
+        drop(map);
+
+        {
+            let mut api = handle.lock().await;
+            api.check_and_reload_if_modified()?;
+        }
+        Ok(handle)
     }
 
     /// Reload an ontology from disk if it's currently loaded (called by file watcher).
     #[allow(dead_code)]
-    pub fn reload_if_loaded(&mut self, path: impl AsRef<Path>) -> Result<(), OwlApiError> {
+    pub async fn reload_if_loaded(&self, path: impl AsRef<Path>) -> Result<(), OwlApiError> {
         let path = canonicalize_or_absolute(path.as_ref());
-        if let Some(api) = self.apis.get_mut(&path) {
+        let handle = {
+            let map = self.apis.lock().await;
+            map.get(&path).cloned()
+        };
+        if let Some(handle) = handle {
+            let mut api = handle.lock().await;
             api.reload()?;
         }
         Ok(())
     }
 
-    /// List all currently loaded ontology file paths.
-    pub fn active_paths(&self) -> Vec<String> {
-        self.apis
-            .keys()
+    /// Snapshot of cached handles (for the file watcher).
+    pub async fn loaded_handles(&self) -> Vec<(PathBuf, Arc<Mutex<OwlApi>>)> {
+        let map = self.apis.lock().await;
+        map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    /// List all currently cached ontology file paths (this process only).
+    pub async fn active_paths(&self) -> Vec<String> {
+        let map = self.apis.lock().await;
+        map.keys()
             .map(|p| p.to_string_lossy().into_owned())
             .collect()
     }
