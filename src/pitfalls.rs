@@ -622,6 +622,19 @@ fn check_p05(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
 
 // ── P06: Including cycles in a class hierarchy ──────────────────────────────
 
+/// Named classes that a superclass expression makes a superclass: the class itself, or the named
+/// members of an intersection (A ⊑ B ⊓ ∃r.C implies A ⊑ B). Restriction fillers are not superclasses,
+/// so part-of chains are not mistaken for hierarchy cycles.
+fn named_superclasses(ce: &ClassExpression<ArcStr>) -> Vec<String> {
+    match ce {
+        ClassExpression::Class(c) => vec![c.0.as_ref().to_string()],
+        ClassExpression::ObjectIntersectionOf(ces) => {
+            ces.iter().flat_map(named_superclasses).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn check_p06(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -632,7 +645,7 @@ fn check_p06(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
                 if is_standard(sub_iri) {
                     continue;
                 }
-                let super_iris = collect_class_iris(&ax.sup);
+                let super_iris = named_superclasses(&ax.sup);
                 for sup_iri in super_iris {
                     if !is_standard(&sup_iri) && sup_iri != sub_iri {
                         graph.entry(sub_iri.to_string()).or_default().push(sup_iri);
@@ -642,36 +655,81 @@ fn check_p06(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
         }
     }
 
-    let mut in_cycle: HashSet<String> = HashSet::new();
-    let all_nodes: Vec<String> = graph.keys().cloned().collect();
-
-    for start in &all_nodes {
-        if in_cycle.contains(start) {
+    // Classes on a cycle are exactly those in a strongly connected component with more than one
+    // member (self-loops are excluded above). Iterative Tarjan over nodes in sorted order, so the
+    // result does not depend on hash order. The earlier check marked every class a depth-first search
+    // had visited when it came back to its start, which over-reported and varied between runs.
+    let mut nodes: Vec<&str> = graph
+        .iter()
+        .flat_map(|(k, vs)| std::iter::once(k.as_str()).chain(vs.iter().map(String::as_str)))
+        .collect();
+    nodes.sort_unstable();
+    nodes.dedup();
+    let id: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let succ: Vec<Vec<usize>> = nodes
+        .iter()
+        .map(|n| {
+            let mut v: Vec<usize> = graph
+                .get(*n)
+                .map(|ss| ss.iter().map(|s| id[s.as_str()]).collect())
+                .unwrap_or_default();
+            v.sort_unstable();
+            v.dedup();
+            v
+        })
+        .collect();
+    let n = nodes.len();
+    let (mut index, mut low) = (vec![usize::MAX; n], vec![0usize; n]);
+    let mut on_stack = vec![false; n];
+    let (mut stack, mut next) = (Vec::new(), 0usize);
+    let mut affected: Vec<String> = Vec::new();
+    for root in 0..n {
+        if index[root] != usize::MAX {
             continue;
         }
-        let mut visited: HashSet<String> = HashSet::new();
-        let mut stack: Vec<String> = vec![start.clone()];
-        while let Some(node) = stack.pop() {
-            if node == *start && visited.contains(start) {
-                in_cycle.extend(visited);
-                break;
+        let mut call: Vec<(usize, usize)> = vec![(root, 0)];
+        while let Some(&mut (v, ref mut i)) = call.last_mut() {
+            if *i == 0 && index[v] == usize::MAX {
+                index[v] = next;
+                low[v] = next;
+                next += 1;
+                stack.push(v);
+                on_stack[v] = true;
             }
-            if !visited.insert(node.clone()) {
+            if let Some(&w) = succ[v].get(*i) {
+                *i += 1;
+                if index[w] == usize::MAX {
+                    call.push((w, 0));
+                } else if on_stack[w] {
+                    low[v] = low[v].min(index[w]);
+                }
                 continue;
             }
-            if let Some(supers) = graph.get(&node) {
-                for s in supers {
-                    stack.push(s.clone());
+            call.pop();
+            if let Some(&(u, _)) = call.last() {
+                low[u] = low[u].min(low[v]);
+            }
+            if low[v] == index[v] {
+                let mut component = Vec::new();
+                while let Some(w) = stack.pop() {
+                    on_stack[w] = false;
+                    component.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                if component.len() > 1 {
+                    affected.extend(component.into_iter().map(|w| nodes[w].to_string()));
                 }
             }
         }
     }
+    affected.sort_unstable();
 
-    if in_cycle.is_empty() {
+    if affected.is_empty() {
         return vec![];
     }
 
-    let affected: Vec<String> = in_cycle.into_iter().collect();
     vec![DetectedPitfall {
         id: "P06".to_string(),
         title: "Including cycles in a class hierarchy".to_string(),
@@ -1643,37 +1701,60 @@ fn check_p30(ontology: &SetOntology<ArcStr>) -> Vec<DetectedPitfall> {
         }
     }
 
-    let mut affected: Vec<String> = Vec::new();
-
-    for i in 0..classes.len() {
-        for j in (i + 1)..classes.len() {
-            if equiv_pairs.contains(&(classes[i].clone(), classes[j].clone())) {
-                continue;
+    // Pairs (i < j) whose normalized local names are equal, or where some non-empty label of i
+    // normalizes to a label of j. Classes are grouped by normalized name and label first, so only
+    // classes that share a key are compared (the all-pairs loop was quadratic: 18 s on ENVO).
+    let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut by_label: HashMap<String, Vec<(usize, bool)>> = HashMap::new();
+    for (idx, iri) in classes.iter().enumerate() {
+        let n = normalize_name(local_name(iri));
+        if !n.is_empty() {
+            by_name.entry(n).or_default().push(idx);
+        }
+        if let Some(ls) = labels.get(iri) {
+            let mut keys: HashMap<String, bool> = HashMap::new();
+            for l in ls {
+                let nonempty = !l.trim().is_empty();
+                let e = keys.entry(normalize_name(l)).or_insert(false);
+                *e = *e || nonempty;
             }
-            let name_i = normalize_name(local_name(&classes[i]));
-            let name_j = normalize_name(local_name(&classes[j]));
-            let names_match = !name_i.is_empty() && name_i == name_j;
+            for (k, nonempty) in keys {
+                by_label.entry(k).or_default().push((idx, nonempty));
+            }
+        }
+    }
+    let mut pairs: HashSet<(usize, usize)> = HashSet::new();
+    for members in by_name.values().filter(|m| m.len() > 1) {
+        for (a, &i) in members.iter().enumerate() {
+            for &j in &members[a + 1..] {
+                pairs.insert((i.min(j), i.max(j)));
+            }
+        }
+    }
+    for members in by_label.values().filter(|m| m.len() > 1) {
+        for (a, &(i, ne_i)) in members.iter().enumerate() {
+            for &(j, ne_j) in &members[a + 1..] {
+                // The label of the lower-indexed class must be non-empty, as in the pairwise check.
+                let (lo, hi, ne_lo) = if i < j { (i, j, ne_i) } else { (j, i, ne_j) };
+                if ne_lo {
+                    pairs.insert((lo, hi));
+                }
+            }
+        }
+    }
+    let mut pairs: Vec<(usize, usize)> = pairs
+        .into_iter()
+        .filter(|&(i, j)| !equiv_pairs.contains(&(classes[i].clone(), classes[j].clone())))
+        .collect();
+    pairs.sort_unstable();
 
-            let labels_match = if !names_match {
-                if let (Some(li), Some(lj)) = (labels.get(&classes[i]), labels.get(&classes[j])) {
-                    li.iter().any(|a| {
-                        lj.iter()
-                            .any(|b| normalize_name(a) == normalize_name(b) && !a.trim().is_empty())
-                    })
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if names_match || labels_match {
-                if !affected.contains(&classes[i]) {
-                    affected.push(classes[i].clone());
-                }
-                if !affected.contains(&classes[j]) {
-                    affected.push(classes[j].clone());
-                }
+    // Same order as the pairwise loop: for each pair in (i, j) order, i then j.
+    let mut affected: Vec<String> = Vec::new();
+    let mut seen: HashSet<usize> = HashSet::new();
+    for (i, j) in pairs {
+        for k in [i, j] {
+            if seen.insert(k) {
+                affected.push(classes[k].clone());
             }
         }
     }
@@ -2382,5 +2463,86 @@ mod tests {
         let filter: HashSet<String> = ["P38".to_string()].into();
         let report = scan(&onto, Some(&filter));
         assert!(report.pitfalls.iter().all(|p| p.id == "P38"));
+    }
+
+    #[test]
+    fn p06_reports_only_classes_on_the_cycle() {
+        let onto = parse_ofn(
+            "Ontology(\
+               Declaration(Class(<http://example.org/A>))\
+               Declaration(Class(<http://example.org/B>))\
+               Declaration(Class(<http://example.org/C>))\
+               Declaration(Class(<http://example.org/D>))\
+               SubClassOf(<http://example.org/A> <http://example.org/B>)\
+               SubClassOf(<http://example.org/B> <http://example.org/A>)\
+               SubClassOf(<http://example.org/C> <http://example.org/A>)\
+               SubClassOf(<http://example.org/D> <http://example.org/C>)\
+             )",
+        );
+        let results = check_p06(&onto);
+        assert_eq!(results.len(), 1);
+        // C and D reach the cycle but are not on it.
+        assert_eq!(
+            results[0].affected_elements,
+            vec!["http://example.org/A", "http://example.org/B"]
+        );
+    }
+
+    #[test]
+    fn p06_ignores_loops_through_restrictions() {
+        let onto = parse_ofn(
+            "Ontology(\
+               Declaration(Class(<http://example.org/E>))\
+               Declaration(Class(<http://example.org/F>))\
+               Declaration(ObjectProperty(<http://example.org/partOf>))\
+               SubClassOf(<http://example.org/E> ObjectSomeValuesFrom(<http://example.org/partOf> <http://example.org/F>))\
+               SubClassOf(<http://example.org/F> ObjectSomeValuesFrom(<http://example.org/partOf> <http://example.org/E>))\
+             )",
+        );
+        assert!(check_p06(&onto).is_empty());
+    }
+
+    #[test]
+    fn p06_counts_named_members_of_an_intersection() {
+        let onto = parse_ofn(
+            "Ontology(\
+               Declaration(Class(<http://example.org/A>))\
+               Declaration(Class(<http://example.org/B>))\
+               Declaration(ObjectProperty(<http://example.org/r>))\
+               SubClassOf(<http://example.org/A> ObjectIntersectionOf(<http://example.org/B> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/B>)))\
+               SubClassOf(<http://example.org/B> <http://example.org/A>)\
+             )",
+        );
+        let results = check_p06(&onto);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].num_affected_elements, 2);
+    }
+
+    #[test]
+    fn p30_flags_same_label_and_skips_declared_equivalents() {
+        let onto = parse_ofn(
+            "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\
+             Ontology(\
+               Declaration(Class(<http://example.org/a/Water>))\
+               Declaration(Class(<http://example.org/b/H2O>))\
+               Declaration(Class(<http://example.org/c/Water>))\
+               Declaration(Class(<http://example.org/d/Liquid>))\
+               Declaration(Class(<http://example.org/e/Fluid>))\
+               AnnotationAssertion(rdfs:label <http://example.org/b/H2O> \"water\")\
+               AnnotationAssertion(rdfs:label <http://example.org/d/Liquid> \"liquid\")\
+               AnnotationAssertion(rdfs:label <http://example.org/e/Fluid> \"liquid\")\
+               EquivalentClasses(<http://example.org/d/Liquid> <http://example.org/e/Fluid>)\
+             )",
+        );
+        let results = check_p30(&onto);
+        assert_eq!(results.len(), 1);
+        let mut affected = results[0].affected_elements.clone();
+        affected.sort();
+        // a/Water and c/Water share a local name; Liquid and Fluid share a label but are declared
+        // equivalent. b/H2O's label is "water" but a/Water has no label, so only names match there.
+        assert_eq!(
+            affected,
+            vec!["http://example.org/a/Water", "http://example.org/c/Water"]
+        );
     }
 }

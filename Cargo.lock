@@ -2477,7 +2477,7 @@ dependencies = [
 [[package]]
 name = "whelk"
 version = "0.1.0"
-source = "git+https://github.com/INCATools/whelk-rs#701710d58b6039794bc5a4348880d813eecf2bbb"
+source = "git+https://github.com/INCATools/whelk-rs#a1f7e54f62e1a5d8be6af73693076bc04c95faa9"
 dependencies = [
  "clap",
  "env_logger",
